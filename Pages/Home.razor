@@ -2338,6 +2338,157 @@ else
                 Detect = DetectMigrUs008,
                 Fix = "Document risks. Example: '### Risks\\n- DevExpress Blazor GridControl API differs from WinForms\\n- Data sync complexity during parallel run'.",
                 Reason = "Risk assessment helps orchestrator suggest mitigation strategies."
+            },
+            // Module Migration Validation Rules (TIER 2)
+            new()
+            {
+                Id = "MIGR-MOD-001",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Scope definition",
+                Detect = DetectMigrMod001,
+                Fix = "Add '## Scope' or '### Scope' section listing what IS included and what is EXCLUDED from this module migration.",
+                Reason = "Orchestrator needs clear module boundaries to generate accurate implementation plan."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-002",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Success Criteria",
+                Detect = DetectMigrMod002,
+                Fix = "Add '## Success Criteria' section with testable/measurable criteria (functional, performance, cutover).",
+                Reason = "Objective completion criteria enable go/no-go cutover decisions."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-003",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Current Tech Stack",
+                Detect = DetectMigrMod003,
+                Fix = "Add '## Current Tech Stack' section listing platform (WinForms/WPF), frameworks (DevExpress versions), and data access pattern.",
+                Reason = "Orchestrator must understand legacy architecture to plan equivalent modern implementation."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-004",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Stored Procedure Inventory",
+                Detect = DetectMigrMod004,
+                Fix = "Add '## Stored Procedure Inventory' section listing all SPs with purpose, parameters, result sets, and business logic.",
+                Reason = "SPs contain validation rules that must transfer to modern layers (gRPC, EF, UI)."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-005",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Business Rule Consolidation",
+                Detect = DetectMigrMod005,
+                Fix = "Add '## Business Rule Consolidation' section listing all 50+ validation rules with current enforcement layer and modern owner (UI/API/EF/DB).",
+                Reason = "Rules scattered across layers are fragile; consolidation improves reliability and prevents silent failures."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-006",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Regression Test Scenarios",
+                Detect = DetectMigrMod006,
+                Fix = "Add '## Regression Test Catalog' section with 60+ test scenarios including scenario, inputs, expected outputs, and test level.",
+                Reason = "Tests define the behavioral contract; orchestrator uses them to understand feature complexity."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-007",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Test Classification Levels",
+                Detect = DetectMigrMod007,
+                Fix = "Add test coverage matrix classifying tests by level (UI, Domain, API, DB, E2E) with count and percentage of total.",
+                Reason = "Test level distribution indicates code quality; ensures comprehensive coverage (not just UI-level tests)."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-008",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Form Lifecycle States",
+                Detect = DetectMigrMod008,
+                Fix = "Add '## Form Lifecycle' or '## State Transition Matrix' section defining states (Load, Edit, Validate, Save, Close) and transitions.",
+                Reason = "Form state machine drives UI behavior (enable/disable); orchestrator uses this to generate PageModel event handlers."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-009",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Field Dependency Matrix",
+                Detect = DetectMigrMod009,
+                Fix = "Add field enabling rules matrix showing which fields enable/disable based on other field values (conditional logic).",
+                Reason = "Complex enabling rules are easy to miss; table format ensures all conditional logic is documented."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-010",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Legacy-to-Modern Field Mapping",
+                Detect = DetectMigrMod010,
+                Fix = "Add '## Field-to-Domain Mapping' table mapping legacy columns → modern entity properties (1:1), including data type conversions.",
+                Reason = "Prevents data loss; EF entity configuration depends on correct mapping."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-011",
+                Category = "Migration / Module Specification",
+                Severity = "error",
+                Title = "Module specification missing Validation Ownership Matrix",
+                Detect = DetectMigrMod011,
+                Fix = "Add validation ownership table showing which layer owns each rule (UI, gRPC, EF, DB). Ensure no rule left without modern owner.",
+                Reason = "Clear ownership prevents validation inconsistencies and silent failures."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-012",
+                Category = "Migration / Module Specification",
+                Severity = "warning",
+                Title = "Module specification missing Test Traceability Markers",
+                Detect = DetectMigrMod012,
+                Fix = "Add test case IDs (TC-001 format) and code↔test cross-references so developers know which tests validate each component.",
+                Reason = "Without traceability, developers don't know which tests to run after code changes."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-013",
+                Category = "Migration / Module Specification",
+                Severity = "warning",
+                Title = "Module specification missing Deployment Strategy",
+                Detect = DetectMigrMod013,
+                Fix = "Add '## Deployment Strategy' section describing parallel run approach, cutover steps (old+new→new only), and rollback plan.",
+                Reason = "Risk management depends on clear cutover and rollback procedures."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-014",
+                Category = "Migration / Module Specification",
+                Severity = "warning",
+                Title = "Module specification missing Database Schema Compatibility",
+                Detect = DetectMigrMod014,
+                Fix = "Add '## Database Schema Compatibility' section confirming EF entities map 1:1 to existing tables (no migrations needed).",
+                Reason = "Prevents expensive data migrations; allows gradual cutover with old+new running simultaneously."
+            },
+            new()
+            {
+                Id = "MIGR-MOD-015",
+                Category = "Migration / Module Specification",
+                Severity = "info",
+                Title = "Module specification missing Performance Targets",
+                Detect = DetectMigrMod015,
+                Fix = "Add '## Performance Targets' section specifying measurable SLAs (grid load time, gRPC latency, save operation, etc.).",
+                Reason = "Performance targets provide go/no-go cutover decision criteria."
             }
         };
     }
@@ -2893,6 +3044,120 @@ else
             {
                 results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
             }
+        }
+
+        return results;
+    }
+
+    // Module Migration Validation Detection Methods (TIER 2)
+    private static List<RuleMatch> DetectMigrMod001(string content)
+    {
+        return HasSection(content, @"##\s+scope|###\s+scope") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod002(string content)
+    {
+        return HasSection(content, @"##\s+success\s+criteria|###\s+success\s+criteria") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod003(string content)
+    {
+        return HasSection(content, @"##\s+current\s+tech|###\s+current\s+tech") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod004(string content)
+    {
+        return HasSection(content, @"##\s+stored\s+procedure|###\s+stored\s+procedure|##\s+sp\s+inventory|###\s+sp\s+inventory") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod005(string content)
+    {
+        return HasSection(content, @"##\s+business\s+rule|###\s+business\s+rule") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod006(string content)
+    {
+        return HasSection(content, @"##\s+regression\s+test|###\s+regression\s+test|##\s+test\s+catalog|###\s+test\s+catalog") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod007(string content)
+    {
+        return HasSection(content, @"test\s+coverage\s+by\s+level|level\s+classification|test\s+level") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod008(string content)
+    {
+        return HasSection(content, @"##\s+form\s+lifecycle|###\s+form\s+lifecycle|##\s+state\s+transition|###\s+state\s+transition") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod009(string content)
+    {
+        return HasSection(content, @"field\s+dependency|field\s+enabling") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod010(string content)
+    {
+        return HasSection(content, @"##\s+field.*mapping|###\s+field.*mapping|##\s+legacy.*domain|###\s+legacy.*domain") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod011(string content)
+    {
+        return HasSection(content, @"validation\s+ownership|ownership\s+matrix") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod012(string content)
+    {
+        var results = new List<RuleMatch>();
+        var hasTraceability = HasSection(content, @"test\s+id|test\s+case\s+id|tc-\d+|traceability");
+        var hasTestSection = HasSection(content, @"##\s+test|###\s+test");
+
+        if (hasTestSection && !hasTraceability)
+        {
+            results.Add(BuildMatch(content, 0, Math.Min(100, content.Length)));
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrMod013(string content)
+    {
+        return HasSection(content, @"##\s+deployment|###\s+deployment|##\s+parallel\s+run|###\s+parallel\s+run") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod014(string content)
+    {
+        return HasSection(content, @"##\s+database|###\s+database|schema\s+compatibility|ef\s+mapping") ? new() : FindDocumentStart(content);
+    }
+
+    private static List<RuleMatch> DetectMigrMod015(string content)
+    {
+        var results = new List<RuleMatch>();
+        var hasPerformance = HasSection(content, @"##\s+performance|###\s+performance|performance\s+target|sla");
+
+        if (!hasPerformance)
+        {
+            results.Add(BuildMatch(content, 0, Math.Min(100, content.Length)));
+        }
+
+        return results;
+    }
+
+    private static bool HasSection(string content, string pattern)
+    {
+        return Regex.IsMatch(content, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline);
+    }
+
+    private static List<RuleMatch> FindDocumentStart(string content)
+    {
+        var results = new List<RuleMatch>();
+        var match = Regex.Match(content, @"^#", RegexOptions.Multiline);
+        if (match.Success)
+        {
+            results.Add(BuildMatch(content, match.Index, match.Length));
+        }
+        else if (content.Length > 0)
+        {
+            results.Add(BuildMatch(content, 0, Math.Min(100, content.Length)));
         }
 
         return results;
