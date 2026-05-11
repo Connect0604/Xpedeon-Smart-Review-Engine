@@ -2258,6 +2258,86 @@ else
                 Detect = DetectApXc003,
                 Fix = "Cross-reference the archetype's documented patterns and ensure conventions are followed.",
                 Reason = "Archetypes define proven patterns; deviating introduces bugs."
+            },
+            new()
+            {
+                Id = "MIGR-US-001",
+                Category = "Migration / User Stories",
+                Severity = "error",
+                Title = "User story missing Description field",
+                Detect = DetectMigrUs001,
+                Fix = "Add a clear description of what the user story does. Example: '### Description\\nUsers can create a new invoice with line items and save it to the database.'",
+                Reason = "Claude orchestrator needs to understand what the feature does to generate accurate migration plan."
+            },
+            new()
+            {
+                Id = "MIGR-US-002",
+                Category = "Migration / User Stories",
+                Severity = "error",
+                Title = "User story missing Phase assignment",
+                Detect = DetectMigrUs002,
+                Fix = "Add phase assignment. Example: '### Phase\\nPhase 1 (Immediate)' or 'Phase 2 (Follow-up)'.",
+                Reason = "Migration must be phased; orchestrator needs to know execution order and dependency management."
+            },
+            new()
+            {
+                Id = "MIGR-US-003",
+                Category = "Migration / User Stories",
+                Severity = "error",
+                Title = "User story missing Complexity assessment",
+                Detect = DetectMigrUs003,
+                Fix = "Add complexity level. Example: '### Complexity\\nMedium - Requires 3-5 days, moderate business logic, standard data mapping.'",
+                Reason = "Team capacity planning and risk assessment depend on accurate complexity estimates."
+            },
+            new()
+            {
+                Id = "MIGR-US-004",
+                Category = "Migration / User Stories",
+                Severity = "error",
+                Title = "User story missing Current Tech documentation",
+                Detect = DetectMigrUs004,
+                Fix = "Document current implementation. Example: '### Current Tech\\nWinForms with DevExpress GridControl, SQL Server stored procedures for validation.'",
+                Reason = "Orchestrator must understand existing implementation to plan accurate replacement."
+            },
+            new()
+            {
+                Id = "MIGR-US-005",
+                Category = "Migration / User Stories",
+                Severity = "error",
+                Title = "User story missing Target Tech documentation",
+                Detect = DetectMigrUs005,
+                Fix = "Document target implementation. Example: '### Target Tech\\nBlazer DataGrid, gRPC service with validation, EF Core entity mapping.'",
+                Reason = "Orchestrator needs to know architecture decisions to generate development tasks."
+            },
+            new()
+            {
+                Id = "MIGR-US-006",
+                Category = "Migration / User Stories",
+                Severity = "warning",
+                Title = "User story missing Acceptance Criteria",
+                Detect = DetectMigrUs006,
+                Fix = "Add acceptance criteria. Example: '### Acceptance Criteria\\n- Can enter invoice data and save\\n- Validation matches legacy behavior\\n- Handles edge cases (negative amounts, duplicate line items)'.",
+                Reason = "Teams need explicit criteria to determine when migration is complete."
+            },
+            new()
+            {
+                Id = "MIGR-US-007",
+                Category = "Migration / User Stories",
+                Severity = "warning",
+                Title = "User story missing Edge Cases documentation",
+                Detect = DetectMigrUs007,
+                Fix = "Document edge cases. Example: '### Edge Cases\\n- Null values in optional fields\\n- Concurrent edits (optimistic locking)\\n- Maximum invoice size limits.'",
+                Reason = "Edge cases often cause migration delays; explicit documentation prevents surprises."
+            },
+            new()
+            {
+                Id = "MIGR-US-008",
+                Category = "Migration / User Stories",
+                Severity = "info",
+                Title = "User story missing Risk Assessment",
+                Detect = DetectMigrUs008,
+                Fix = "Document risks. Example: '### Risks\\n- DevExpress Blazor GridControl API differs from WinForms\\n- Data sync complexity during parallel run'.",
+                Reason = "Risk assessment helps orchestrator suggest mitigation strategies."
             }
         };
     }
@@ -2652,6 +2732,166 @@ else
             foreach (Match match in Regex.Matches(content, Regex.Escape(archetype), RegexOptions.IgnoreCase))
             {
                 results.Add(BuildMatch(content, match.Index, match.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrUs001(string content)
+    {
+        var results = new List<RuleMatch>();
+        var userStoryPattern = new Regex(@"^###\s+[UUS]-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        foreach (Match usMatch in userStoryPattern.Matches(content))
+        {
+            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
+            if (nextUsIndex < 0) nextUsIndex = content.Length;
+
+            var usBlock = content[usMatch.Index..nextUsIndex];
+            if (!Regex.IsMatch(usBlock, @"###\s+description", RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrUs002(string content)
+    {
+        var results = new List<RuleMatch>();
+        var userStoryPattern = new Regex(@"^###\s+[UUS]-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        foreach (Match usMatch in userStoryPattern.Matches(content))
+        {
+            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
+            if (nextUsIndex < 0) nextUsIndex = content.Length;
+
+            var usBlock = content[usMatch.Index..nextUsIndex];
+            if (!Regex.IsMatch(usBlock, @"###\s+phase", RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrUs003(string content)
+    {
+        var results = new List<RuleMatch>();
+        var userStoryPattern = new Regex(@"^###\s+[UUS]-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        foreach (Match usMatch in userStoryPattern.Matches(content))
+        {
+            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
+            if (nextUsIndex < 0) nextUsIndex = content.Length;
+
+            var usBlock = content[usMatch.Index..nextUsIndex];
+            if (!Regex.IsMatch(usBlock, @"###\s+complexity", RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrUs004(string content)
+    {
+        var results = new List<RuleMatch>();
+        var userStoryPattern = new Regex(@"^###\s+[UUS]-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        foreach (Match usMatch in userStoryPattern.Matches(content))
+        {
+            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
+            if (nextUsIndex < 0) nextUsIndex = content.Length;
+
+            var usBlock = content[usMatch.Index..nextUsIndex];
+            if (!Regex.IsMatch(usBlock, @"###\s+current\s+tech", RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrUs005(string content)
+    {
+        var results = new List<RuleMatch>();
+        var userStoryPattern = new Regex(@"^###\s+[UUS]-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        foreach (Match usMatch in userStoryPattern.Matches(content))
+        {
+            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
+            if (nextUsIndex < 0) nextUsIndex = content.Length;
+
+            var usBlock = content[usMatch.Index..nextUsIndex];
+            if (!Regex.IsMatch(usBlock, @"###\s+target\s+tech", RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrUs006(string content)
+    {
+        var results = new List<RuleMatch>();
+        var userStoryPattern = new Regex(@"^###\s+[UUS]-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        foreach (Match usMatch in userStoryPattern.Matches(content))
+        {
+            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
+            if (nextUsIndex < 0) nextUsIndex = content.Length;
+
+            var usBlock = content[usMatch.Index..nextUsIndex];
+            if (!Regex.IsMatch(usBlock, @"###\s+acceptance\s+criteria", RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrUs007(string content)
+    {
+        var results = new List<RuleMatch>();
+        var userStoryPattern = new Regex(@"^###\s+[UUS]-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        foreach (Match usMatch in userStoryPattern.Matches(content))
+        {
+            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
+            if (nextUsIndex < 0) nextUsIndex = content.Length;
+
+            var usBlock = content[usMatch.Index..nextUsIndex];
+            if (!Regex.IsMatch(usBlock, @"###\s+edge\s+cases", RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectMigrUs008(string content)
+    {
+        var results = new List<RuleMatch>();
+        var userStoryPattern = new Regex(@"^###\s+[UUS]-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        foreach (Match usMatch in userStoryPattern.Matches(content))
+        {
+            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
+            if (nextUsIndex < 0) nextUsIndex = content.Length;
+
+            var usBlock = content[usMatch.Index..nextUsIndex];
+            if (!Regex.IsMatch(usBlock, @"###\s+risks?", RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
             }
         }
 
