@@ -1,0 +1,2863 @@
+@page "/"
+@using System.Text
+@using System.Text.RegularExpressions
+@inject IJSRuntime JS
+
+<PageTitle>Smart Review System</PageTitle>
+
+@if (!HasFileLoaded)
+{
+    <div class="srs-upload-screen">
+        <div class="srs-dropzone @(IsDragging ? "dragging" : string.Empty)"
+             @ondragenter="OnDragEnter"
+             @ondragover="OnDragOver"
+             @ondragleave="OnDragLeave"
+             @ondrop="OnDrop"
+             @ondragenter:preventDefault="true"
+             @ondragover:preventDefault="true"
+             @ondragleave:preventDefault="true"
+             @ondrop:preventDefault="true">
+            <InputFile OnChange="HandleFileSelected" accept=".md,.txt,.markdown" class="srs-file-input" />
+            <div class="srs-upload-icon">UP</div>
+            <h2>Drop your .md plan file here</h2>
+            <p>or click to browse</p>
+            <p class="srs-upload-hint">Accepted: <code>.md</code>, <code>.txt</code>, <code>.markdown</code></p>
+            @if (!string.IsNullOrWhiteSpace(UploadError))
+            {
+                <p class="srs-error">@UploadError</p>
+            }
+        </div>
+    </div>
+}
+else
+{
+    var selectedSection = CurrentSection;
+    var selectedViolations = selectedSection is null
+        ? new List<Violation>()
+        : GetViolationsForSection(selectedSection.Id);
+    var selectedErrorCount = selectedViolations.Count(v => IsSeverity(v.Severity, "error"));
+    var selectedWarningCount = selectedViolations.Count(v => IsSeverity(v.Severity, "warning"));
+    var selectedInfoCount = selectedViolations.Count(v => IsSeverity(v.Severity, "info"));
+    var filteredSections = FilteredSections.ToList();
+
+    <div class="srs-app">
+        <header class="srs-topbar">
+            <div class="srs-topbar-left">
+                <span class="srs-file-pill">@UploadedFileName</span>
+                <span class="srs-count-pill">@Sections.Count sections</span>
+                <span class="srs-count-pill danger">@TotalIssueCount issues</span>
+            </div>
+            <div class="srs-topbar-actions">
+                <button type="button" class="srs-btn srs-btn-primary" @onclick="OpenRevisionPromptModal" disabled="@(TotalIssueCount == 0)">
+                    Generate Revision Prompt
+                </button>
+                <button type="button" class="srs-btn srs-btn-ghost" @onclick="ResetAll">Close</button>
+            </div>
+        </header>
+
+        <div class="srs-review-shell">
+            <aside class="srs-left-panel">
+                <div class="srs-sidebar-head">
+                    <div>
+                        <div class="srs-panel-label">Sections</div>
+                        <div class="srs-sidebar-summary">@CleanSectionCount clean / @Sections.Count total</div>
+                    </div>
+                </div>
+                <input class="srs-section-search"
+                       placeholder="Search sections"
+                       @bind="SectionSearchText"
+                       @bind:event="oninput" />
+                <div class="srs-filter-tabs" role="group" aria-label="Section filters">
+                    <button type="button" class="@(SectionFilter == SectionFilterMode.All ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.All)">
+                        All
+                    </button>
+                    <button type="button" class="@(SectionFilter == SectionFilterMode.Issues ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.Issues)">
+                        Issues
+                    </button>
+                    <button type="button" class="@(SectionFilter == SectionFilterMode.Clean ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.Clean)">
+                        Clean
+                    </button>
+                </div>
+                <div class="srs-sections-list">
+                    @if (filteredSections.Count == 0)
+                    {
+                        <div class="srs-empty-list">No sections match.</div>
+                    }
+                    else
+                    {
+                        @foreach (var sectionItem in filteredSections)
+                        {
+                            var status = GetSectionStatus(sectionItem.Id);
+                            var isActive = sectionItem.Id == SelectedSectionId;
+                            <button type="button"
+                                    class="srs-section-row @(isActive ? "active" : string.Empty)"
+                                    @onclick="() => SelectSection(sectionItem.Id)">
+                                <span class="srs-letter-badge">@sectionItem.Letter</span>
+                                <span class="srs-section-main">
+                                    <span class="srs-section-title">@sectionItem.Heading</span>
+                                    <span class="srs-line-meta">Line @(sectionItem.LineStart)</span>
+                                </span>
+                                <span class="srs-violation-pill @status.CssClass">@status.BadgeText</span>
+                            </button>
+                        }
+                    }
+                </div>
+            </aside>
+
+            <main class="srs-focus-panel">
+                @if (selectedSection is null)
+                {
+                    <div class="srs-empty-center">Select a section to review.</div>
+                }
+                else
+                {
+                    <div class="srs-focus-header">
+                        <div class="srs-focus-title-row">
+                            <span class="srs-letter-badge large">@selectedSection.Letter</span>
+                            <div class="srs-focus-title">
+                                <h2>@selectedSection.Heading</h2>
+                                <div class="srs-center-meta">Line @(selectedSection.LineStart) - @(selectedSection.LineCount) lines</div>
+                            </div>
+                        </div>
+                        <div class="srs-section-nav">
+                            <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => SelectAdjacentIssue(-1)" disabled="@(!HasAdjacentIssue(-1))">
+                                Previous issue
+                            </button>
+                            <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => SelectAdjacentIssue(1)" disabled="@(!HasAdjacentIssue(1))">
+                                Next issue
+                            </button>
+                        </div>
+                    </div>
+
+                    <section class="srs-conclusion-card @(selectedViolations.Count == 0 ? "clean" : "needs-work")">
+                        <div>
+                            <div class="srs-conclusion-kicker">Conclusion</div>
+                            <h3>@GetSectionConclusion(selectedViolations)</h3>
+                            <p>@GetSectionAction(selectedViolations)</p>
+                        </div>
+                        <div class="srs-conclusion-stats">
+                            <span>@selectedErrorCount errors</span>
+                            <span>@selectedWarningCount warnings</span>
+                            <span>@selectedInfoCount info</span>
+                        </div>
+                    </section>
+
+                    @if (selectedViolations.Count > 0)
+                    {
+                        <section class="srs-fix-list" aria-label="Fix checklist">
+                            <div class="srs-section-label-row">
+                                <span class="srs-panel-label">Fix checklist</span>
+                                <span>@selectedViolations.Count item@(selectedViolations.Count == 1 ? string.Empty : "s")</span>
+                            </div>
+                            @for (var i = 0; i < selectedViolations.Count; i++)
+                            {
+                                var violation = selectedViolations[i];
+                                var reasonKey = BuildReasonKey(selectedSection.Id, violation, i);
+                                var reasonExpanded = ExpandedReasonKeys.Contains(reasonKey);
+                                <article class="srs-fix-item @GetSeverityClass(violation.Severity)">
+                                    <div class="srs-fix-heading">
+                                        <span class="srs-rule-id @GetSeverityClass(violation.Severity)">@violation.RuleId</span>
+                                        <span>@violation.Title</span>
+                                    </div>
+                                    <div class="srs-fix-text">@violation.Fix</div>
+                                    <button type="button"
+                                            class="srs-btn srs-btn-ghost srs-reason-toggle"
+                                            @onclick="() => ToggleReason(reasonKey)">
+                                        @(reasonExpanded ? "Hide evidence" : "Show evidence")
+                                    </button>
+                                    @if (reasonExpanded)
+                                    {
+                                        <div class="srs-reason-box">
+                                            <div class="srs-detail-label">Matched</div>
+                                            <div class="srs-matched-text">@TruncateForDisplay(violation.Matched, 120)</div>
+                                            <div class="srs-detail-label">Reason</div>
+                                            <div>@violation.Reason</div>
+                                        </div>
+                                    }
+                                </article>
+                            }
+                        </section>
+                    }
+
+                    <section class="srs-document-card">
+                        <div class="srs-section-label-row">
+                            <span class="srs-panel-label">Section content</span>
+                            <span>Original markdown</span>
+                        </div>
+                        <div class="srs-markdown">
+                            @((MarkupString)RenderMarkdown(selectedSection.Content))
+                        </div>
+                    </section>
+                }
+            </main>
+        </div>
+    </div>
+}
+
+@if (ShowRevisionModal)
+{
+    <div class="srs-modal-overlay" @onclick="CloseRevisionPromptModal">
+        <div class="srs-modal-card" @onclick:stopPropagation="true">
+            <div class="srs-modal-header">
+                <h3>Revision Prompt</h3>
+                <button type="button" class="srs-btn srs-btn-ghost" @onclick="CloseRevisionPromptModal">Close</button>
+            </div>
+            <div class="srs-modal-body">
+                <pre>@RevisionPromptText</pre>
+            </div>
+            <div class="srs-modal-footer">
+                <button type="button" class="srs-btn srs-btn-primary" @onclick="CopyRevisionPromptAsync">@CopyButtonLabel</button>
+                <button type="button" class="srs-btn srs-btn-ghost" @onclick="CloseRevisionPromptModal">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    :root {
+        --srs-text-primary: var(--color-text-primary, #111827);
+        --srs-text-secondary: var(--color-text-secondary, #374151);
+        --srs-text-tertiary: var(--color-text-tertiary, #6b7280);
+        --srs-text-info: var(--color-text-info, #2563eb);
+        --srs-bg-primary: var(--color-background-primary, #ffffff);
+        --srs-bg-secondary: var(--color-background-secondary, #f9fafb);
+        --srs-bg-info: var(--color-background-info, #dbeafe);
+        --srs-bg-success: var(--color-background-success, #dcfce7);
+        --srs-border-secondary: var(--color-border-secondary, #d1d5db);
+        --srs-border-tertiary: var(--color-border-tertiary, #e5e7eb);
+        --srs-radius-md: var(--border-radius-md, 8px);
+        --srs-radius-lg: var(--border-radius-lg, 10px);
+        --srs-mono: var(--font-mono, "Consolas", "SFMono-Regular", "Menlo", monospace);
+    }
+
+    html, body, .main-host {
+        height: 100%;
+        margin: 0;
+        background: #f6f7f9;
+        color: var(--srs-text-primary);
+        font-family: "Segoe UI", "Noto Sans", Arial, sans-serif;
+    }
+
+    .main-host {
+        display: block;
+    }
+
+    .srs-upload-screen {
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+    }
+
+    .srs-dropzone {
+        width: min(760px, 100%);
+        min-height: 280px;
+        border: 2px dashed var(--srs-border-secondary);
+        border-radius: var(--srs-radius-lg);
+        background: var(--srs-bg-primary);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.65rem;
+        padding: 2rem;
+        position: relative;
+        transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+        text-align: center;
+    }
+
+    .srs-dropzone.dragging {
+        border-color: #16a34a;
+        background: color-mix(in srgb, var(--srs-bg-success) 78%, white 22%);
+        transform: translateY(-2px);
+    }
+
+    .srs-file-input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+    .srs-upload-icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: color-mix(in srgb, var(--srs-bg-info) 72%, white 28%);
+        display: grid;
+        place-items: center;
+        color: var(--srs-text-info);
+        font-size: 1.4rem;
+        font-weight: 700;
+    }
+
+    .srs-dropzone h2 {
+        margin: 0;
+        font-size: 1.28rem;
+    }
+
+    .srs-dropzone p {
+        margin: 0;
+        color: var(--srs-text-secondary);
+    }
+
+    .srs-upload-hint {
+        font-size: 0.9rem;
+        color: var(--srs-text-tertiary);
+    }
+
+    .srs-error {
+        color: #b91c1c;
+        font-weight: 600;
+    }
+
+    .srs-app {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .srs-topbar {
+        height: 58px;
+        padding: 0 1.1rem;
+        border-bottom: 1px solid var(--srs-border-tertiary);
+        background: var(--srs-bg-primary);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        position: sticky;
+        top: 0;
+        z-index: 20;
+    }
+
+    .srs-topbar-left {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        min-width: 0;
+    }
+
+    .srs-file-pill {
+        display: inline-block;
+        max-width: min(680px, 58vw);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: var(--srs-radius-md);
+        padding: 0.34rem 0.65rem;
+        background: #fafafa;
+        font-weight: 600;
+    }
+
+    .srs-count-pill {
+        border-radius: 999px;
+        padding: 0.24rem 0.55rem;
+        background: #eef2ff;
+        color: var(--srs-text-info);
+        font-size: 0.78rem;
+        font-weight: 700;
+        border: 1px solid #dbe4ff;
+        line-height: 1;
+    }
+
+    .srs-count-pill.danger {
+        background: #fff1f2;
+        border-color: #fecdd3;
+        color: #be123c;
+    }
+
+    .srs-topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+    }
+
+    .srs-review-shell {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+    }
+
+    .srs-left-panel {
+        border-right: 1px solid var(--srs-border-tertiary);
+        background: #fbfcfd;
+        padding: 0.75rem 0.65rem;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .srs-sidebar-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.65rem;
+    }
+
+    .srs-sidebar-summary {
+        margin-top: 0.18rem;
+        color: var(--srs-text-tertiary);
+        font-size: 0.78rem;
+    }
+
+    .srs-panel-label {
+        color: var(--srs-text-tertiary);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .srs-section-search {
+        width: 100%;
+        height: 38px;
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: 8px;
+        background: var(--srs-bg-primary);
+        color: var(--srs-text-primary);
+        padding: 0 0.72rem;
+        font-size: 0.88rem;
+        outline: none;
+    }
+
+    .srs-section-search:focus {
+        border-color: #93b4ee;
+        box-shadow: 0 0 0 3px #dbeafe;
+    }
+
+    .srs-filter-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.25rem;
+        margin-top: 0.55rem;
+        padding: 0.2rem;
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: 9px;
+        background: #f3f4f6;
+    }
+
+    .srs-filter-tabs button {
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--srs-text-tertiary);
+        cursor: pointer;
+        font-size: 0.8rem;
+        font-weight: 650;
+        padding: 0.34rem 0.3rem;
+    }
+
+    .srs-filter-tabs button.active {
+        background: var(--srs-bg-primary);
+        color: var(--srs-text-primary);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+
+    .srs-sections-list {
+        margin-top: 0.7rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        overflow-y: auto;
+        padding-right: 0.1rem;
+    }
+
+    .srs-empty-list {
+        color: var(--srs-text-tertiary);
+        font-size: 0.86rem;
+        padding: 0.7rem 0.25rem;
+    }
+
+    .srs-section-row {
+        width: 100%;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        display: grid;
+        grid-template-columns: 22px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0.42rem;
+        padding: 0.42rem 0.48rem;
+        cursor: pointer;
+        text-align: left;
+        color: inherit;
+    }
+
+    .srs-section-row:hover {
+        background: #f3f6fb;
+    }
+
+    .srs-section-row.active {
+        background: #eef4ff;
+        box-shadow: inset 3px 0 0 var(--srs-text-info);
+    }
+
+    .srs-section-row.active .srs-section-title {
+        color: var(--srs-text-info);
+        font-weight: 700;
+    }
+
+    .srs-letter-badge {
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        background: var(--srs-bg-primary);
+        border: 1px solid var(--srs-border-tertiary);
+        display: inline-grid;
+        place-items: center;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: var(--srs-text-secondary);
+    }
+
+    .srs-letter-badge.large {
+        width: 30px;
+        height: 30px;
+        font-size: 0.88rem;
+    }
+
+    .srs-section-main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .srs-section-title {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.86rem;
+        font-weight: 600;
+    }
+
+    .srs-line-meta {
+        margin-top: 1px;
+        font-family: var(--srs-mono);
+        font-size: 0.72rem;
+        color: var(--srs-text-tertiary);
+    }
+
+    .srs-violation-pill {
+        font-family: var(--srs-mono);
+        font-size: 0.7rem;
+        border-radius: 999px;
+        padding: 0.12rem 0.42rem;
+        border: 1px solid transparent;
+        min-width: 2.3rem;
+        text-align: center;
+    }
+
+    .srs-badge-error {
+        background: #fee2e2;
+        color: #b91c1c;
+        border-color: #fecaca;
+    }
+
+    .srs-badge-warning {
+        background: #fef3c7;
+        color: #92400e;
+        border-color: #fcd34d;
+    }
+
+    .srs-badge-clean {
+        background: color-mix(in srgb, var(--srs-bg-success) 75%, white 25%);
+        color: #166534;
+        border-color: #86efac;
+    }
+
+    .srs-focus-panel {
+        min-width: 0;
+        overflow-y: auto;
+        padding: 1.15rem 1.4rem 1.6rem;
+        background: #f6f7f9;
+    }
+
+    .srs-empty-center {
+        color: var(--srs-text-tertiary);
+    }
+
+    .srs-focus-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1rem;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.85rem;
+    }
+
+    .srs-focus-title-row {
+        display: flex;
+        align-items: center;
+        gap: 0.56rem;
+        min-width: 0;
+    }
+
+    .srs-focus-title {
+        min-width: 0;
+    }
+
+    .srs-focus-title h2 {
+        margin: 0;
+        font-size: 1.18rem;
+        min-width: 0;
+        line-height: 1.25;
+    }
+
+    .srs-center-meta {
+        color: var(--srs-text-tertiary);
+        font-family: var(--srs-mono);
+        font-size: 0.79rem;
+    }
+
+    .srs-section-nav {
+        display: flex;
+        gap: 0.45rem;
+        align-items: center;
+    }
+
+    .srs-divider {
+        margin: 0.8rem 0 1.1rem;
+        border-bottom: 1px solid var(--srs-border-tertiary);
+    }
+
+    .srs-conclusion-card,
+    .srs-fix-list,
+    .srs-document-card {
+        background: var(--srs-bg-primary);
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: 10px;
+        margin-bottom: 0.85rem;
+    }
+
+    .srs-conclusion-card {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 1rem;
+    }
+
+    .srs-conclusion-card.needs-work {
+        border-left: 4px solid #dc2626;
+    }
+
+    .srs-conclusion-card.clean {
+        border-left: 4px solid #16a34a;
+    }
+
+    .srs-conclusion-kicker {
+        color: var(--srs-text-tertiary);
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .srs-conclusion-card h3 {
+        margin: 0.18rem 0 0;
+        color: var(--srs-text-primary);
+        font-size: 1rem;
+    }
+
+    .srs-conclusion-card p {
+        margin: 0.35rem 0 0;
+        color: var(--srs-text-secondary);
+        line-height: 1.45;
+    }
+
+    .srs-conclusion-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        justify-content: flex-end;
+        min-width: 170px;
+    }
+
+    .srs-conclusion-stats span {
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: 999px;
+        color: var(--srs-text-secondary);
+        background: #fafafa;
+        font-size: 0.76rem;
+        font-weight: 650;
+        padding: 0.22rem 0.48rem;
+    }
+
+    .srs-section-label-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.72rem 0.88rem;
+        border-bottom: 1px solid var(--srs-border-tertiary);
+        color: var(--srs-text-tertiary);
+        font-size: 0.8rem;
+    }
+
+    .srs-fix-list {
+        overflow: hidden;
+    }
+
+    .srs-fix-item {
+        border-bottom: 1px solid var(--srs-border-tertiary);
+        padding: 0.82rem 0.9rem;
+        display: grid;
+        gap: 0.42rem;
+    }
+
+    .srs-fix-item:last-child {
+        border-bottom: 0;
+    }
+
+    .srs-fix-item.severity-error {
+        box-shadow: inset 3px 0 0 #dc2626;
+    }
+
+    .srs-fix-item.severity-warning {
+        box-shadow: inset 3px 0 0 #d97706;
+    }
+
+    .srs-fix-item.severity-info {
+        box-shadow: inset 3px 0 0 #2563eb;
+    }
+
+    .srs-fix-heading {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        align-items: flex-start;
+        color: var(--srs-text-primary);
+        font-weight: 700;
+        line-height: 1.35;
+    }
+
+    .srs-document-card {
+        overflow: hidden;
+    }
+
+    .srs-markdown {
+        color: var(--srs-text-secondary);
+        line-height: 1.62;
+        font-size: 0.94rem;
+        max-width: 1120px;
+        padding: 0.95rem 1rem 1.1rem;
+    }
+
+    .srs-markdown h2,
+    .srs-markdown h3,
+    .srs-markdown h4 {
+        color: var(--srs-text-primary);
+        margin-top: 1.1rem;
+        margin-bottom: 0.45rem;
+    }
+
+    .srs-markdown h2 {
+        font-size: 1.16rem;
+    }
+
+    .srs-markdown h3 {
+        font-size: 1.05rem;
+    }
+
+    .srs-markdown h4 {
+        font-size: 0.98rem;
+    }
+
+    .srs-markdown p {
+        margin: 0.42rem 0;
+    }
+
+    .srs-markdown a {
+        color: var(--srs-text-info);
+        text-decoration: none;
+    }
+
+    .srs-markdown a:hover {
+        text-decoration: underline;
+    }
+
+    .srs-markdown ul,
+    .srs-markdown ol {
+        margin: 0.4rem 0 0.6rem;
+        padding-left: 1.2rem;
+    }
+
+    .srs-markdown li {
+        margin: 0.2rem 0;
+    }
+
+    .srs-markdown blockquote {
+        margin: 0.65rem 0;
+        border-left: 4px solid var(--srs-text-info);
+        padding: 0.5rem 0.8rem;
+        background: color-mix(in srgb, var(--srs-bg-info) 62%, white 38%);
+        border-radius: 0 var(--srs-radius-md) var(--srs-radius-md) 0;
+    }
+
+    .srs-markdown hr {
+        border: 0;
+        border-top: 1px solid var(--srs-border-tertiary);
+        margin: 0.9rem 0;
+    }
+
+    .srs-inline-code {
+        font-family: var(--srs-mono);
+        background: color-mix(in srgb, var(--srs-bg-secondary) 78%, white 22%);
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: 6px;
+        padding: 0.08rem 0.36rem;
+        font-size: 0.88em;
+        color: #9f1239;
+    }
+
+    .srs-code-wrap {
+        border: 1px solid var(--srs-border-secondary);
+        border-radius: var(--srs-radius-md);
+        overflow: hidden;
+        margin: 0.7rem 0;
+        background: color-mix(in srgb, var(--srs-bg-secondary) 78%, white 22%);
+    }
+
+    .srs-code-lang {
+        font-family: var(--srs-mono);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--srs-text-tertiary);
+        border-bottom: 1px solid var(--srs-border-tertiary);
+        padding: 0.4rem 0.64rem;
+    }
+
+    .srs-code-wrap pre {
+        margin: 0;
+        overflow-x: auto;
+        padding: 0.7rem;
+        font-family: var(--srs-mono);
+        font-size: 0.84rem;
+        color: var(--srs-text-secondary);
+    }
+
+    .srs-table-wrap {
+        overflow-x: auto;
+        margin: 0.8rem 0 1rem;
+    }
+
+    .srs-table-wrap table {
+        border-collapse: collapse;
+        width: 100%;
+        min-width: 420px;
+        background: var(--srs-bg-primary);
+        border: 1px solid #dde3ec;
+    }
+
+    .srs-table-wrap th,
+    .srs-table-wrap td {
+        border: 1px solid var(--srs-border-tertiary);
+        padding: 0.52rem 0.62rem;
+        text-align: left;
+        vertical-align: top;
+    }
+
+    .srs-table-wrap th {
+        background: #f7f8fa;
+        color: var(--srs-text-primary);
+        font-weight: 700;
+    }
+
+    .srs-table-wrap tbody tr:hover {
+        background: color-mix(in srgb, var(--srs-bg-info) 32%, white 68%);
+    }
+
+    .srs-right-panel {
+        border-left: 1px solid var(--srs-border-tertiary);
+        background: #fbfcfd;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        width: 320px;
+    }
+
+    .srs-right-panel.collapsed {
+        width: 52px;
+    }
+
+    .srs-right-header {
+        border-bottom: 1px solid var(--srs-border-tertiary);
+        padding: 0.62rem 0.7rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .srs-right-title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+    }
+
+    .srs-right-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.72rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+    }
+
+    .srs-right-footer {
+        padding: 0.7rem;
+        border-top: 1px solid var(--srs-border-tertiary);
+        background: color-mix(in srgb, var(--srs-bg-primary) 88%, #f8fafc 12%);
+    }
+
+    .srs-clean-state {
+        border: 1px solid color-mix(in srgb, #16a34a 28%, transparent);
+        background: color-mix(in srgb, var(--srs-bg-success) 78%, white 22%);
+        border-radius: var(--srs-radius-md);
+        padding: 0.8rem;
+        color: #166534;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-weight: 600;
+    }
+
+    .srs-clean-icon {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: #16a34a;
+        color: white;
+        font-size: 0.8rem;
+    }
+
+    .srs-severity-group h4 {
+        margin: 0;
+        color: var(--srs-text-tertiary);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .srs-severity-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .srs-violation-card {
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: 8px;
+        background: var(--srs-bg-primary);
+        padding: 0.7rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.42rem;
+    }
+
+    .srs-violation-card.severity-error {
+        border-left: 3px solid #dc2626;
+    }
+
+    .srs-violation-card.severity-warning {
+        border-left: 3px solid #d97706;
+    }
+
+    .srs-violation-card.severity-info {
+        border-left: 3px solid #2563eb;
+    }
+
+    .srs-rule-line {
+        display: flex;
+        gap: 0.38rem;
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .srs-rule-id {
+        border-radius: 999px;
+        padding: 0.12rem 0.42rem;
+        font-family: var(--srs-mono);
+        font-size: 0.72rem;
+        border: 1px solid transparent;
+        font-weight: 700;
+    }
+
+    .srs-rule-id.severity-error {
+        background: #fee2e2;
+        color: #b91c1c;
+        border-color: #fecaca;
+    }
+
+    .srs-rule-id.severity-warning {
+        background: #fef3c7;
+        color: #92400e;
+        border-color: #fde68a;
+    }
+
+    .srs-rule-id.severity-info {
+        background: #dbeafe;
+        color: #1d4ed8;
+        border-color: #bfdbfe;
+    }
+
+    .srs-rule-title {
+        font-weight: 650;
+        color: var(--srs-text-primary);
+        font-size: 0.86rem;
+        line-height: 1.35;
+        flex: 1 1 160px;
+    }
+
+    .srs-matched-text {
+        font-family: var(--srs-mono);
+        font-size: 0.77rem;
+        color: #475569;
+        background: #f8fafc;
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: 7px;
+        padding: 0.38rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .srs-fix-text {
+        font-size: 0.84rem;
+        color: var(--srs-text-secondary);
+        line-height: 1.45;
+    }
+
+    .srs-reason-toggle {
+        align-self: flex-start;
+        font-size: 0.78rem;
+        padding: 0.32rem 0;
+        border: 0;
+        color: var(--srs-text-info);
+    }
+
+    .srs-reason-box {
+        border-radius: 7px;
+        border: 1px solid var(--srs-border-tertiary);
+        padding: 0.55rem;
+        background: #fafafa;
+        font-size: 0.8rem;
+        color: var(--srs-text-secondary);
+        display: grid;
+        gap: 0.38rem;
+    }
+
+    .srs-detail-label {
+        color: var(--srs-text-tertiary);
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    .srs-empty-right {
+        color: var(--srs-text-tertiary);
+        font-size: 0.9rem;
+    }
+
+    .srs-btn {
+        border: 1px solid var(--srs-border-secondary);
+        background: var(--srs-bg-primary);
+        color: var(--srs-text-primary);
+        border-radius: 8px;
+        padding: 0.42rem 0.68rem;
+        cursor: pointer;
+        font-size: 0.86rem;
+        font-weight: 600;
+        transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+    }
+
+    .srs-btn:hover {
+        background: #f3f6fb;
+        border-color: #bfd0ef;
+    }
+
+    .srs-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.48;
+    }
+
+    .srs-btn:active {
+        transform: translateY(1px);
+    }
+
+    .srs-btn-ghost {
+        background: transparent;
+    }
+
+    .srs-btn-primary {
+        background: #1d4ed8;
+        border-color: #1e40af;
+        color: white;
+    }
+
+    .srs-btn-primary:hover {
+        background: #1e40af;
+        border-color: #1e3a8a;
+        color: white;
+    }
+
+    .srs-btn.full {
+        width: 100%;
+    }
+
+    .srs-collapse-btn {
+        min-width: 2rem;
+        padding: 0.35rem 0.55rem;
+    }
+
+    .srs-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.38);
+        backdrop-filter: blur(4px);
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+    }
+
+    .srs-modal-card {
+        width: min(720px, 100%);
+        max-height: 80vh;
+        background: var(--srs-bg-primary);
+        border-radius: var(--srs-radius-lg);
+        border: 1px solid var(--srs-border-tertiary);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.26);
+    }
+
+    .srs-modal-header {
+        border-bottom: 1px solid var(--srs-border-tertiary);
+        padding: 0.8rem 0.95rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .srs-modal-header h3 {
+        margin: 0;
+        font-size: 1.02rem;
+    }
+
+    .srs-modal-body {
+        overflow: auto;
+        padding: 0.95rem;
+        background: color-mix(in srgb, var(--srs-bg-secondary) 68%, white 32%);
+    }
+
+    .srs-modal-body pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: "Segoe UI", "Noto Sans", Arial, sans-serif;
+        color: var(--srs-text-secondary);
+        line-height: 1.5;
+    }
+
+    .srs-modal-footer {
+        position: sticky;
+        bottom: 0;
+        border-top: 1px solid var(--srs-border-tertiary);
+        background: var(--srs-bg-primary);
+        padding: 0.75rem 0.95rem;
+        display: flex;
+        gap: 0.6rem;
+        justify-content: flex-end;
+    }
+
+    @@media (max-width: 1180px) {
+        .srs-review-shell {
+            grid-template-columns: 280px minmax(0, 1fr);
+        }
+    }
+
+    @@media (max-width: 980px) {
+        .srs-review-shell {
+            grid-template-columns: 1fr;
+            grid-template-rows: minmax(260px, 34vh) 1fr;
+        }
+
+        .srs-left-panel {
+            border: 0;
+            border-bottom: 1px solid var(--srs-border-tertiary);
+        }
+
+        .srs-focus-panel {
+            padding: 1rem;
+        }
+
+        .srs-focus-header,
+        .srs-conclusion-card {
+            flex-direction: column;
+        }
+
+        .srs-sections-list {
+            overflow-x: auto;
+            overflow-y: auto;
+        }
+    }
+
+    @@media (max-width: 640px) {
+        .srs-topbar {
+            height: auto;
+            padding: 0.75rem;
+            align-items: flex-start;
+            flex-direction: column;
+        }
+
+        .srs-topbar-left,
+        .srs-topbar-actions,
+        .srs-section-nav {
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        .srs-topbar-actions .srs-btn,
+        .srs-section-nav .srs-btn {
+            flex: 1;
+        }
+
+        .srs-conclusion-stats {
+            justify-content: flex-start;
+            min-width: 0;
+        }
+    }
+</style>
+
+@code {
+    private readonly IReadOnlyList<string> SeverityOrder = new[] { "error", "warning", "info" };
+
+    private enum SectionFilterMode
+    {
+        All,
+        Issues,
+        Clean
+    }
+
+    // ============================================================
+    // SECTION 1: ANTIPATTERN RULEBOOK
+    // ============================================================
+    private readonly IReadOnlyList<AntipatternRule> Rulebook = CreateRulebook();
+
+    // ============================================================
+    // SECTION 2: MARKDOWN PARSER (regex-based renderer)
+    // ============================================================
+    private readonly List<SectionModel> Sections = new();
+    private readonly HashSet<string> ExpandedReasonKeys = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, List<Violation>> ViolationsBySection = new(StringComparer.OrdinalIgnoreCase);
+    private string? UploadedFileName;
+    private string UploadError = string.Empty;
+    private string? SelectedSectionId;
+    private string SectionSearchText = string.Empty;
+    private SectionFilterMode SectionFilter = SectionFilterMode.All;
+    private bool IsDragging;
+    private bool IsViolationsPanelCollapsed;
+    private bool ShowRevisionModal;
+    private string RevisionPromptText = string.Empty;
+    private string CopyButtonLabel = "Copy to Clipboard";
+
+    private bool HasFileLoaded => Sections.Count > 0;
+    private SectionModel? CurrentSection => Sections.FirstOrDefault(s => s.Id == SelectedSectionId);
+    private int TotalIssueCount => ViolationsBySection.Values.Sum(violations => violations.Count);
+    private int CleanSectionCount => Sections.Count(section => GetViolationsForSection(section.Id).Count == 0);
+    private IEnumerable<SectionModel> IssueSections => Sections.Where(section => GetViolationsForSection(section.Id).Count > 0);
+
+    private IEnumerable<SectionModel> FilteredSections
+    {
+        get
+        {
+            var query = SectionSearchText.Trim();
+            IEnumerable<SectionModel> sections = SectionFilter switch
+            {
+                SectionFilterMode.Issues => Sections.Where(section => GetViolationsForSection(section.Id).Count > 0),
+                SectionFilterMode.Clean => Sections.Where(section => GetViolationsForSection(section.Id).Count == 0),
+                _ => Sections
+            };
+
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                sections = sections.Where(section =>
+                    section.Heading.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    section.Content.Contains(query, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return sections;
+        }
+    }
+
+    private void OnDragEnter()
+    {
+        IsDragging = true;
+    }
+
+    private void OnDragOver()
+    {
+        IsDragging = true;
+    }
+
+    private void OnDragLeave()
+    {
+        IsDragging = false;
+    }
+
+    private void OnDrop()
+    {
+        IsDragging = false;
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs args)
+    {
+        IsDragging = false;
+        UploadError = string.Empty;
+
+        var file = args.File;
+        if (file is null)
+        {
+            UploadError = "No file selected.";
+            return;
+        }
+
+        var extension = Path.GetExtension(file.Name);
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".md", ".txt", ".markdown" };
+        if (!allowed.Contains(extension))
+        {
+            UploadError = "Unsupported file type. Please upload a .md, .txt, or .markdown file.";
+            return;
+        }
+
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+
+            UploadedFileName = file.Name;
+            Sections.Clear();
+            Sections.AddRange(ParseSections(content));
+            SelectedSectionId = Sections.FirstOrDefault()?.Id;
+            ViolationsBySection = RunAllRules(Sections, Rulebook);
+            ExpandedReasonKeys.Clear();
+            SectionSearchText = string.Empty;
+            SectionFilter = SectionFilterMode.All;
+            IsViolationsPanelCollapsed = false;
+            ShowRevisionModal = false;
+            CopyButtonLabel = "Copy to Clipboard";
+
+            if (Sections.Count == 0)
+            {
+                UploadError = "The uploaded file has no parsable sections.";
+            }
+        }
+        catch (Exception ex)
+        {
+            UploadError = $"Failed to read file: {ex.Message}";
+        }
+    }
+
+    private void ResetAll()
+    {
+        UploadedFileName = null;
+        UploadError = string.Empty;
+        SelectedSectionId = null;
+        Sections.Clear();
+        ViolationsBySection = new Dictionary<string, List<Violation>>(StringComparer.OrdinalIgnoreCase);
+        ExpandedReasonKeys.Clear();
+        SectionSearchText = string.Empty;
+        SectionFilter = SectionFilterMode.All;
+        IsViolationsPanelCollapsed = false;
+        ShowRevisionModal = false;
+        RevisionPromptText = string.Empty;
+        CopyButtonLabel = "Copy to Clipboard";
+    }
+
+    private void SelectSection(string sectionId)
+    {
+        SelectedSectionId = sectionId;
+    }
+
+    private void SetSectionFilter(SectionFilterMode filter)
+    {
+        SectionFilter = filter;
+    }
+
+    private bool HasAdjacentIssue(int direction)
+    {
+        if (SelectedSectionId is null)
+        {
+            return false;
+        }
+
+        var issueSections = IssueSections.ToList();
+        var currentIndex = issueSections.FindIndex(section => section.Id == SelectedSectionId);
+        if (currentIndex < 0)
+        {
+            currentIndex = Sections.FindIndex(section => section.Id == SelectedSectionId);
+            return direction > 0
+                ? issueSections.Any(section => Sections.IndexOf(section) > currentIndex)
+                : issueSections.Any(section => Sections.IndexOf(section) < currentIndex);
+        }
+
+        var nextIndex = currentIndex + direction;
+        return nextIndex >= 0 && nextIndex < issueSections.Count;
+    }
+
+    private void SelectAdjacentIssue(int direction)
+    {
+        if (SelectedSectionId is null)
+        {
+            return;
+        }
+
+        var issueSections = IssueSections.ToList();
+        if (issueSections.Count == 0)
+        {
+            return;
+        }
+
+        var currentIssueIndex = issueSections.FindIndex(section => section.Id == SelectedSectionId);
+        if (currentIssueIndex >= 0)
+        {
+            var nextIssueIndex = Math.Clamp(currentIssueIndex + direction, 0, issueSections.Count - 1);
+            SelectedSectionId = issueSections[nextIssueIndex].Id;
+            return;
+        }
+
+        var currentSectionIndex = Sections.FindIndex(section => section.Id == SelectedSectionId);
+        var nextSection = direction > 0
+            ? issueSections.FirstOrDefault(section => Sections.IndexOf(section) > currentSectionIndex)
+            : issueSections.LastOrDefault(section => Sections.IndexOf(section) < currentSectionIndex);
+
+        if (nextSection is not null)
+        {
+            SelectedSectionId = nextSection.Id;
+        }
+    }
+
+    private void ToggleViolationsPanel()
+    {
+        IsViolationsPanelCollapsed = !IsViolationsPanelCollapsed;
+    }
+
+    private void ToggleReason(string key)
+    {
+        if (!ExpandedReasonKeys.Add(key))
+        {
+            ExpandedReasonKeys.Remove(key);
+        }
+    }
+
+    private string BuildReasonKey(string sectionId, Violation violation, int groupIndex)
+    {
+        return $"{sectionId}|{violation.RuleId}|{groupIndex}|{violation.Matched.GetHashCode()}";
+    }
+
+    private List<Violation> GetViolationsForSection(string sectionId)
+    {
+        return ViolationsBySection.TryGetValue(sectionId, out var violations)
+            ? violations
+            : new List<Violation>();
+    }
+
+    private SectionStatus GetSectionStatus(string sectionId)
+    {
+        var violations = GetViolationsForSection(sectionId);
+        var errorCount = violations.Count(v => IsSeverity(v.Severity, "error"));
+        var warningCount = violations.Count(v => IsSeverity(v.Severity, "warning"));
+        var total = violations.Count;
+
+        if (errorCount > 0)
+        {
+            return new SectionStatus
+            {
+                BadgeText = total.ToString(),
+                CssClass = "srs-badge-error"
+            };
+        }
+
+        if (warningCount > 0 || total > 0)
+        {
+            return new SectionStatus
+            {
+                BadgeText = total.ToString(),
+                CssClass = "srs-badge-warning"
+            };
+        }
+
+        return new SectionStatus
+        {
+            BadgeText = "OK",
+            CssClass = "srs-badge-clean"
+        };
+    }
+
+    private static bool IsSeverity(string value, string expected)
+    {
+        return value.Equals(expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetSeverityHeading(string severity)
+    {
+        return severity.ToLowerInvariant() switch
+        {
+            "error" => "Errors",
+            "warning" => "Warnings",
+            "info" => "Info",
+            _ => "Other"
+        };
+    }
+
+    private static string GetSeverityClass(string severity)
+    {
+        return severity.ToLowerInvariant() switch
+        {
+            "error" => "severity-error",
+            "warning" => "severity-warning",
+            "info" => "severity-info",
+            _ => "severity-info"
+        };
+    }
+
+    private static string GetSectionConclusion(IReadOnlyCollection<Violation> violations)
+    {
+        if (violations.Count == 0)
+        {
+            return "This section is clean.";
+        }
+
+        var errorCount = violations.Count(violation => IsSeverity(violation.Severity, "error"));
+        var warningCount = violations.Count(violation => IsSeverity(violation.Severity, "warning"));
+
+        if (errorCount > 0)
+        {
+            return $"{errorCount} blocking issue{(errorCount == 1 ? string.Empty : "s")} needs revision.";
+        }
+
+        if (warningCount > 0)
+        {
+            return $"{warningCount} warning{(warningCount == 1 ? string.Empty : "s")} should be checked.";
+        }
+
+        return $"{violations.Count} note{(violations.Count == 1 ? string.Empty : "s")} found.";
+    }
+
+    private static string GetSectionAction(IReadOnlyCollection<Violation> violations)
+    {
+        if (violations.Count == 0)
+        {
+            return "No action is required for this section. Move to the next section that has issues.";
+        }
+
+        var firstError = violations.FirstOrDefault(violation => IsSeverity(violation.Severity, "error"));
+        var primaryViolation = firstError ?? violations.First();
+        return $"Start with {primaryViolation.RuleId}: {primaryViolation.Fix}";
+    }
+
+    private void OpenRevisionPromptModal()
+    {
+        RevisionPromptText = BuildRevisionPrompt();
+        ShowRevisionModal = true;
+        CopyButtonLabel = "Copy to Clipboard";
+    }
+
+    private void CloseRevisionPromptModal()
+    {
+        ShowRevisionModal = false;
+    }
+
+    private async Task CopyRevisionPromptAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", RevisionPromptText);
+            CopyButtonLabel = "Copied";
+            StateHasChanged();
+            await Task.Delay(2000);
+            CopyButtonLabel = "Copy to Clipboard";
+            StateHasChanged();
+        }
+        catch
+        {
+            CopyButtonLabel = "Copy failed";
+        }
+    }
+
+    private static List<SectionModel> ParseSections(string markdown)
+    {
+        var normalized = markdown.Replace("\r\n", "\n");
+        var lines = normalized.Split('\n');
+        var sections = new List<SectionModel>();
+        var headingRegex = new Regex(@"^##\s+(.+)$", RegexOptions.Compiled);
+
+        var currentHeading = "Preamble";
+        var currentStart = 1;
+        var buffer = new List<string>();
+        var encounteredHeading = false;
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            var headingMatch = headingRegex.Match(line);
+            if (headingMatch.Success)
+            {
+                if (encounteredHeading || buffer.Count > 0)
+                {
+                    AddSection(sections, currentHeading, currentStart, buffer);
+                }
+
+                currentHeading = headingMatch.Groups[1].Value.Trim();
+                currentStart = i + 1;
+                buffer = new List<string>();
+                encounteredHeading = true;
+                continue;
+            }
+
+            buffer.Add(line);
+        }
+
+        if (encounteredHeading || buffer.Count > 0)
+        {
+            AddSection(sections, currentHeading, currentStart, buffer);
+        }
+
+        if (sections.Count == 0)
+        {
+            sections.Add(new SectionModel
+            {
+                Id = "section-1",
+                Letter = "A",
+                Heading = "Preamble",
+                LineStart = 1,
+                LineCount = lines.Length,
+                Content = markdown.Trim()
+            });
+        }
+
+        return sections;
+    }
+
+    private static void AddSection(List<SectionModel> sections, string heading, int lineStart, List<string> lines)
+    {
+        var parsed = ParseHeading(heading, sections.Count);
+        var content = string.Join('\n', lines).TrimEnd();
+
+        sections.Add(new SectionModel
+        {
+            Id = $"section-{sections.Count + 1}",
+            Letter = parsed.Letter,
+            Heading = parsed.Title,
+            LineStart = lineStart,
+            LineCount = Math.Max(1, lines.Count),
+            Content = content
+        });
+    }
+
+    private static (string Letter, string Title) ParseHeading(string heading, int sectionIndex)
+    {
+        if (heading.Equals("Preamble", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("P", "Preamble");
+        }
+
+        var match = Regex.Match(heading, @"^\s*([A-Z])\.\s+(.+)$");
+        if (match.Success)
+        {
+            return (match.Groups[1].Value.Trim(), match.Groups[2].Value.Trim());
+        }
+
+        var letter = ((char)('A' + (sectionIndex % 26))).ToString();
+        return (letter, heading.Trim());
+    }
+
+    private static string RenderMarkdown(string markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return "<p>(No section content)</p>";
+        }
+
+        var normalized = markdown.Replace("\r\n", "\n");
+        var codeBlocks = new List<string>();
+
+        normalized = Regex.Replace(
+            normalized,
+            @"```([^\r\n`]*)\r?\n([\s\S]*?)```",
+            match =>
+            {
+                var language = match.Groups[1].Value.Trim();
+                var code = EscapeHtml(match.Groups[2].Value.TrimEnd('\r', '\n'));
+                var languageTag = string.IsNullOrWhiteSpace(language) ? "text" : EscapeHtml(language);
+                var html =
+                    "<div class=\"srs-code-wrap\">" +
+                    "<div class=\"srs-code-lang\">" + languageTag + "</div>" +
+                    "<pre><code>" + code + "</code></pre>" +
+                    "</div>";
+                codeBlocks.Add(html);
+                return $"@@CODEBLOCK_{codeBlocks.Count - 1}@@";
+            },
+            RegexOptions.Multiline);
+
+        var lines = normalized.Split('\n');
+        var sb = new StringBuilder();
+
+        var i = 0;
+        while (i < lines.Length)
+        {
+            var rawLine = lines[i];
+            var line = rawLine.TrimEnd('\r');
+            var trimmed = line.Trim();
+
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                i++;
+                continue;
+            }
+
+            if (TryRenderCodePlaceholder(trimmed, codeBlocks, sb))
+            {
+                i++;
+                continue;
+            }
+
+            if (TryRenderHeading(line, sb))
+            {
+                i++;
+                continue;
+            }
+
+            if (IsHorizontalRule(line))
+            {
+                sb.AppendLine("<hr />");
+                i++;
+                continue;
+            }
+
+            if (trimmed.StartsWith(">"))
+            {
+                var blockquoteLines = new List<string>();
+                while (i < lines.Length && lines[i].TrimStart().StartsWith(">"))
+                {
+                    var quoteLine = lines[i].TrimStart();
+                    var content = quoteLine.Length > 1 ? quoteLine[1..].TrimStart() : string.Empty;
+                    blockquoteLines.Add($"<p>{FormatInline(content)}</p>");
+                    i++;
+                }
+
+                sb.AppendLine($"<blockquote>{string.Join(string.Empty, blockquoteLines)}</blockquote>");
+                continue;
+            }
+
+            if (IsTableHeaderLine(line, lines, i))
+            {
+                var tableHtml = RenderTable(lines, ref i);
+                sb.AppendLine(tableHtml);
+                continue;
+            }
+
+            if (IsUnorderedListLine(line))
+            {
+                sb.AppendLine("<ul>");
+                while (i < lines.Length && IsUnorderedListLine(lines[i]))
+                {
+                    var item = Regex.Replace(lines[i], @"^\s*-\s+", string.Empty);
+                    sb.AppendLine($"<li>{FormatInline(item)}</li>");
+                    i++;
+                }
+                sb.AppendLine("</ul>");
+                continue;
+            }
+
+            if (IsOrderedListLine(line))
+            {
+                sb.AppendLine("<ol>");
+                while (i < lines.Length && IsOrderedListLine(lines[i]))
+                {
+                    var item = Regex.Replace(lines[i], @"^\s*\d+\.\s+", string.Empty);
+                    sb.AppendLine($"<li>{FormatInline(item)}</li>");
+                    i++;
+                }
+                sb.AppendLine("</ol>");
+                continue;
+            }
+
+            var paragraphLines = new List<string>();
+            while (i < lines.Length)
+            {
+                var look = lines[i].Trim();
+                if (string.IsNullOrWhiteSpace(look) ||
+                    Regex.IsMatch(look, @"^@@CODEBLOCK_\d+@@$") ||
+                    IsHorizontalRule(lines[i]) ||
+                    IsUnorderedListLine(lines[i]) ||
+                    IsOrderedListLine(lines[i]) ||
+                    lines[i].TrimStart().StartsWith(">") ||
+                    Regex.IsMatch(lines[i], @"^#{2,4}\s+") ||
+                    IsTableHeaderLine(lines[i], lines, i))
+                {
+                    break;
+                }
+
+                paragraphLines.Add(FormatInline(lines[i].Trim()));
+                i++;
+            }
+
+            if (paragraphLines.Count > 0)
+            {
+                sb.AppendLine($"<p>{string.Join("<br />", paragraphLines)}</p>");
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static bool TryRenderHeading(string line, StringBuilder sb)
+    {
+        var h4Match = Regex.Match(line, @"^####\s+(.+)$");
+        if (h4Match.Success)
+        {
+            sb.AppendLine($"<h4>{FormatInline(h4Match.Groups[1].Value)}</h4>");
+            return true;
+        }
+
+        var h3Match = Regex.Match(line, @"^###\s+(.+)$");
+        if (h3Match.Success)
+        {
+            sb.AppendLine($"<h3>{FormatInline(h3Match.Groups[1].Value)}</h3>");
+            return true;
+        }
+
+        var h2Match = Regex.Match(line, @"^##\s+(.+)$");
+        if (h2Match.Success)
+        {
+            sb.AppendLine($"<h2>{FormatInline(h2Match.Groups[1].Value)}</h2>");
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsHorizontalRule(string line)
+    {
+        return Regex.IsMatch(line.Trim(), @"^---+$");
+    }
+
+    private static bool IsUnorderedListLine(string line)
+    {
+        return Regex.IsMatch(line, @"^\s*-\s+");
+    }
+
+    private static bool IsOrderedListLine(string line)
+    {
+        return Regex.IsMatch(line, @"^\s*\d+\.\s+");
+    }
+
+    private static bool IsTableHeaderLine(string line, IReadOnlyList<string> lines, int index)
+    {
+        if (index + 1 >= lines.Count)
+        {
+            return false;
+        }
+
+        var next = lines[index + 1];
+        var hasPipe = line.Contains('|');
+        var separatorMatch = Regex.IsMatch(next.Trim(), @"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$");
+        return hasPipe && separatorMatch;
+    }
+
+    private static string RenderTable(IReadOnlyList<string> lines, ref int index)
+    {
+        var headerCells = SplitTableCells(lines[index]);
+        index += 2;
+
+        var bodyRows = new List<string>();
+        while (index < lines.Count && lines[index].Contains('|') && !string.IsNullOrWhiteSpace(lines[index].Trim()))
+        {
+            var rowCells = SplitTableCells(lines[index]);
+            var cols = new StringBuilder();
+            foreach (var cell in rowCells)
+            {
+                cols.Append($"<td>{FormatInline(cell)}</td>");
+            }
+            bodyRows.Add($"<tr>{cols}</tr>");
+            index++;
+        }
+
+        var headBuilder = new StringBuilder();
+        foreach (var header in headerCells)
+        {
+            headBuilder.Append($"<th>{FormatInline(header)}</th>");
+        }
+
+        var bodyContent = bodyRows.Count == 0 ? "<tr></tr>" : string.Join(string.Empty, bodyRows);
+        return
+            "<div class=\"srs-table-wrap\">" +
+            "<table>" +
+            "<thead><tr>" + headBuilder + "</tr></thead>" +
+            "<tbody>" + bodyContent + "</tbody>" +
+            "</table>" +
+            "</div>";
+    }
+
+    private static List<string> SplitTableCells(string line)
+    {
+        var trimmed = line.Trim();
+        if (trimmed.StartsWith("|"))
+        {
+            trimmed = trimmed[1..];
+        }
+        if (trimmed.EndsWith("|"))
+        {
+            trimmed = trimmed[..^1];
+        }
+
+        return trimmed.Split('|').Select(c => c.Trim()).ToList();
+    }
+
+    private static bool TryRenderCodePlaceholder(string token, IReadOnlyList<string> codeBlocks, StringBuilder sb)
+    {
+        var match = Regex.Match(token, @"^@@CODEBLOCK_(\d+)@@$");
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(match.Groups[1].Value, out var index) || index < 0 || index >= codeBlocks.Count)
+        {
+            return false;
+        }
+
+        sb.AppendLine(codeBlocks[index]);
+        return true;
+    }
+
+    private static string FormatInline(string input)
+    {
+        var text = EscapeHtml(input);
+
+        text = Regex.Replace(text, @"`([^`\n]+)`", m => $"<code class=\"srs-inline-code\">{m.Groups[1].Value}</code>");
+        text = Regex.Replace(text, @"\*\*\*([^\n]+?)\*\*\*", "<strong><em>$1</em></strong>");
+        text = Regex.Replace(text, @"\*\*([^\n*]+?)\*\*", "<strong>$1</strong>");
+        text = Regex.Replace(text, @"\*([^\n*]+?)\*", "<em>$1</em>");
+        text = Regex.Replace(text, @"~~([^\n~]+?)~~", "<del>$1</del>");
+        text = Regex.Replace(text, @"\[(.+?)\]\((.+?)\)", "<a href=\"$2\" target=\"_blank\" rel=\"noopener noreferrer\">$1</a>");
+        return text;
+    }
+
+    private static string EscapeHtml(string value)
+    {
+        return value
+            .Replace("&", "&amp;", StringComparison.Ordinal)
+            .Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal);
+    }
+
+    // ============================================================
+    // SECTION 3: DETECTION ENGINE (run rules against sections)
+    // ============================================================
+    private static Dictionary<string, List<Violation>> RunAllRules(
+        IReadOnlyList<SectionModel> sections,
+        IReadOnlyList<AntipatternRule> rules)
+    {
+        var results = new Dictionary<string, List<Violation>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var section in sections)
+        {
+            var violations = new List<Violation>();
+
+            foreach (var rule in rules)
+            {
+                var matches = rule.Detect(section.Content);
+                foreach (var match in matches)
+                {
+                    var excerpt = !string.IsNullOrWhiteSpace(match.Context)
+                        ? match.Context
+                        : match.Matched;
+
+                    violations.Add(new Violation
+                    {
+                        RuleId = rule.Id,
+                        Severity = rule.Severity,
+                        Title = rule.Title,
+                        Matched = Truncate(excerpt, 120),
+                        Fix = rule.Fix,
+                        Reason = rule.Reason
+                    });
+                }
+            }
+
+            results[section.Id] = violations
+                .OrderBy(v => SeverityRank(v.Severity))
+                .ThenBy(v => v.RuleId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        return results;
+    }
+
+    private static int SeverityRank(string severity)
+    {
+        return severity.ToLowerInvariant() switch
+        {
+            "error" => 0,
+            "warning" => 1,
+            "info" => 2,
+            _ => 3
+        };
+    }
+
+    private static IReadOnlyList<AntipatternRule> CreateRulebook()
+    {
+        return new List<AntipatternRule>
+        {
+            new()
+            {
+                Id = "AP-UI-001",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "FilterFieldNames on DxGrid columns",
+                Detect = DetectApUi001,
+                Fix = "Remove FilterFieldNames. Use ValueFieldName + TextFieldName on the combo editor instead.",
+                Reason = "DevExpress 25.2.3 throws KeyNotFoundException."
+            },
+            new()
+            {
+                Id = "AP-UI-002",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "CellDisplayTemplate on required FK columns",
+                Detect = DetectApUi002,
+                Fix = "Remove CellDisplayTemplate from required FK columns. Use EditSettings with DxComboBoxSettings instead.",
+                Reason = "Suppresses validation icon on required fields."
+            },
+            new()
+            {
+                Id = "AP-UI-003",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "Columns without paired EditFormat on combo cells",
+                Detect = DetectApUi003,
+                Fix = "Add `<EditFormat>{0} - {1}</EditFormat>` after the `<Columns>` block inside every DxComboBoxSettings.",
+                Reason = "DevExpress 25.2.3 KeyNotFoundException (dead-end #2)."
+            },
+            new()
+            {
+                Id = "AP-UI-004",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "SortIndex on grid with FocusedRowEnabled",
+                Detect = DetectApUi004,
+                Fix = "Remove SortIndex. Control sort order via in-place list Sort after data load.",
+                Reason = "Causes dead-end focus loop (dead-end #7)."
+            },
+            new()
+            {
+                Id = "AP-UI-005",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "CustomizeElement on XpedeonCrudGrid",
+                Detect = DetectApUi005,
+                Fix = "Remove CustomizeElement. Only valid on raw DxGrid, not XpedeonCrudGrid wrapper.",
+                Reason = "Silent crash - XpedeonCrudGrid does not expose this event."
+            },
+            new()
+            {
+                Id = "AP-UI-006",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "Raw DxGrid used for CRUD surfaces",
+                Detect = DetectApUi006,
+                Fix = "Replace DxGrid with XpedeonCrudGrid for CRUD surfaces.",
+                Reason = "XpedeonCrudGrid wraps DxGrid with standardized CRUD behavior."
+            },
+            new()
+            {
+                Id = "AP-UI-007",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "Reassigning FormModel collection lists",
+                Detect = DetectApUi007,
+                Fix = "Use in-place mutation: list.Clear() then list.AddRange(newData). Never reassign the list reference.",
+                Reason = "Reassignment breaks Blazor change tracking and DxGrid data binding."
+            },
+            new()
+            {
+                Id = "AP-UI-008",
+                Category = "UI / Razor",
+                Severity = "warning",
+                Title = "Missing TextFieldName=\"DisplayText\" on FK combo columns",
+                Detect = DetectApUi008,
+                Fix = "Add TextFieldName=\"DisplayText\" to every DxComboBoxSettings bound to an FK lookup.",
+                Reason = "Without it, the combo displays the raw value instead of the formatted display text."
+            },
+            new()
+            {
+                Id = "AP-UI-009",
+                Category = "UI / Razor",
+                Severity = "warning",
+                Title = "Missing EnableValidation=\"false\" on DxComboBox inside CellEditTemplate",
+                Detect = DetectApUi009,
+                Fix = "Add EnableValidation=\"false\" to every DxComboBox inside CellEditTemplate.",
+                Reason = "Prevents duplicate validation messages."
+            },
+            new()
+            {
+                Id = "AP-UI-010",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "CaptionPosition.Horizontal",
+                Detect = DetectApUi010,
+                Fix = "Remove. Use default caption positioning.",
+                Reason = "Banned - breaks Xpedeon layout system."
+            },
+            new()
+            {
+                Id = "AP-UI-011",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "ColSpanMd",
+                Detect = DetectApUi011,
+                Fix = "Remove. Use CSS grid or Xpedeon layout classes.",
+                Reason = "Banned - not supported in the component library version."
+            },
+            new()
+            {
+                Id = "AP-UI-012",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "NewItemRowPosition (wrong property name)",
+                Detect = DetectApUi012,
+                Fix = "Replace with EditNewRowPosition.",
+                Reason = "Wrong property name - it's EditNewRowPosition on XpedeonCrudGrid."
+            },
+            new()
+            {
+                Id = "AP-UI-013",
+                Category = "UI / Razor",
+                Severity = "error",
+                Title = "Visible attribute on DxTabPage",
+                Detect = DetectApUi013,
+                Fix = "Use conditional render (@if block) to include/exclude the DxTabPage element entirely.",
+                Reason = "DxTabs derives its tab strip from rendered children. Visible attribute doesn't work - omit the child instead."
+            },
+            new()
+            {
+                Id = "AP-BE-001",
+                Category = "Backend / Data",
+                Severity = "error",
+                Title = "FromSqlInterpolated with multi-result-set SPs",
+                Detect = DetectApBe001,
+                Fix = "Use raw SqlConnection / SqlDataReader with NextResult() pattern.",
+                Reason = "FromSqlInterpolated silently drops result sets 2+."
+            },
+            new()
+            {
+                Id = "AP-BE-002",
+                Category = "Backend / Data",
+                Severity = "error",
+                Title = "EF migration for ROW_VERSION columns (RD-1)",
+                Detect = DetectApBe002,
+                Fix = "Do NOT generate an EF migration for ROW_VERSION. Columns already exist in DB (reviewer added them). Map via [Timestamp] / .IsRowVersion() in EF config.",
+                Reason = "RD-1 resolved - migration would fail or duplicate."
+            },
+            new()
+            {
+                Id = "AP-BE-003",
+                Category = "Backend / Data",
+                Severity = "error",
+                Title = "Positional int cast for string-backed enums",
+                Detect = DetectApBe003,
+                Fix = "Use explicit string mapping. SubledgerApplicableTo stores \"AP\"/\"AR\" as strings, not integers.",
+                Reason = "Positional cast produces 0/1 instead of \"AP\"/\"AR\", corrupting data."
+            },
+            new()
+            {
+                Id = "AP-BE-004",
+                Category = "Backend / Data",
+                Severity = "warning",
+                Title = "Missing HasTrigger() in EF configuration",
+                Detect = DetectApBe004,
+                Fix = "Add .HasTrigger(\"TRG_FC_INS_<TABLE>\"), .HasTrigger(\"TRG_FC_UPD_<TABLE>\"), .HasTrigger(\"TRG_FC_DEL_<TABLE>\").",
+                Reason = "EF Core 9 without HasTrigger() throws 'trigger affects rowcount' exception."
+            },
+            new()
+            {
+                Id = "AP-BE-005",
+                Category = "Backend / Data",
+                Severity = "warning",
+                Title = "Missing sentinel-zero handling in nullable-required-FK mappers",
+                Detect = DetectApBe005,
+                Fix = "DTO->Entity: use `?? 0`. Entity->DTO: convert 0 back to null. Proto->DTO: check HasXxx.",
+                Reason = "Prevents zero-FK insertion violating referential integrity."
+            },
+            new()
+            {
+                Id = "AP-BE-006",
+                Category = "Backend / Data",
+                Severity = "warning",
+                Title = "Missing IsRowVersion() wiring",
+                Detect = DetectApBe006,
+                Fix = "Add .Property(e => e.RowVersion).IsRowVersion().",
+                Reason = "Required for optimistic concurrency."
+            },
+            new()
+            {
+                Id = "AP-BE-007",
+                Category = "Backend / Data",
+                Severity = "error",
+                Title = "Module-specific filters on shared ListComponents RPCs",
+                Detect = DetectApBe007,
+                Fix = "Create a module-local RPC. Do not modify shared ListComponents definitions.",
+                Reason = "Shared RPCs serve multiple consumers - module-specific params break others."
+            },
+            new()
+            {
+                Id = "AP-XC-001",
+                Category = "Cross-Cutting",
+                Severity = "warning",
+                Title = "Missing [Display(Name)] on enum values",
+                Detect = DetectApXc001,
+                Fix = "Add [Display(Name = \"...\")] attribute to every enum value.",
+                Reason = "Required for GetEnumDisplayName() in combo editors."
+            },
+            new()
+            {
+                Id = "AP-XC-002",
+                Category = "Cross-Cutting",
+                Severity = "warning",
+                Title = "Missing DisplayText partial-class extension",
+                Detect = DetectApXc002,
+                Fix = "Create partial-class extension: `string DisplayText => string.IsNullOrEmpty(<Name>) ? (<Code> ?? string.Empty) : $\"{<Code>} - {<Name>}\";`",
+                Reason = "Combo editors bind to DisplayText - without extension, runtime error."
+            },
+            new()
+            {
+                Id = "AP-XC-003",
+                Category = "Cross-Cutting",
+                Severity = "info",
+                Title = "Section references archetype without following conventions",
+                Detect = DetectApXc003,
+                Fix = "Cross-reference the archetype's documented patterns and ensure conventions are followed.",
+                Reason = "Archetypes define proven patterns; deviating introduces bugs."
+            }
+        };
+    }
+
+    private static List<RuleMatch> DetectApUi001(string content)
+    {
+        return RegexMatches(content, "FilterFieldNames");
+    }
+
+    private static List<RuleMatch> DetectApUi002(string content)
+    {
+        var results = new List<RuleMatch>();
+        var templateRegex = new Regex("<CellDisplayTemplate>", RegexOptions.IgnoreCase);
+        var columnRegex = new Regex("<DxGridDataColumn\\b[^>]*>", RegexOptions.IgnoreCase);
+        var fieldRegex = new Regex("FieldName\\s*=\\s*(?:\"([^\"]+)\"|'([^']+)')", RegexOptions.IgnoreCase);
+        var readOnlyRegex = new Regex("ReadOnly\\s*=\\s*(?:\"true\"|'true')", RegexOptions.IgnoreCase);
+
+        foreach (Match templateMatch in templateRegex.Matches(content))
+        {
+            var before = content[..templateMatch.Index];
+            var columns = columnRegex.Matches(before);
+            if (columns.Count == 0)
+            {
+                continue;
+            }
+
+            var nearestColumn = columns[^1];
+            var columnTag = nearestColumn.Value;
+            var fieldMatch = fieldRegex.Match(columnTag);
+            if (!fieldMatch.Success)
+            {
+                continue;
+            }
+
+            var fieldValue = fieldMatch.Groups[1].Success
+                ? fieldMatch.Groups[1].Value
+                : fieldMatch.Groups[2].Value;
+
+            fieldValue = fieldValue.Replace("@nameof(", string.Empty, StringComparison.OrdinalIgnoreCase).Trim(')', '"', '\'', ' ');
+
+            var isFkCandidate =
+                fieldValue.Contains("Code", StringComparison.OrdinalIgnoreCase) ||
+                fieldValue.Contains("Id", StringComparison.OrdinalIgnoreCase) ||
+                fieldValue.Contains("Number", StringComparison.OrdinalIgnoreCase);
+
+            var isReadOnly = readOnlyRegex.IsMatch(columnTag);
+            var isClosed = fieldValue.Equals("IsClosed", StringComparison.OrdinalIgnoreCase);
+
+            if (isFkCandidate && !isReadOnly && !isClosed)
+            {
+                results.Add(BuildMatch(content, templateMatch.Index, templateMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApUi003(string content)
+    {
+        var results = new List<RuleMatch>();
+        var blocks = GetComboSettingsBlocks(content);
+        foreach (var block in blocks)
+        {
+            var hasColumns = Regex.IsMatch(block.Text, "<Columns>", RegexOptions.IgnoreCase);
+            var hasEditFormat = Regex.IsMatch(block.Text, "<EditFormat>", RegexOptions.IgnoreCase);
+            if (hasColumns && !hasEditFormat)
+            {
+                results.Add(BuildMatch(content, block.Index, block.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApUi004(string content)
+    {
+        var results = new List<RuleMatch>();
+        var sortMatches = Regex.Matches(content, "SortIndex", RegexOptions.IgnoreCase);
+        var focusedMatches = Regex.Matches(content, "FocusedRowEnabled\\s*=\\s*\"true\"", RegexOptions.IgnoreCase);
+        if (sortMatches.Count == 0 || focusedMatches.Count == 0)
+        {
+            return results;
+        }
+
+        foreach (Match sort in sortMatches)
+        {
+            var nearFocused = focusedMatches.Cast<Match>().Any(f => Math.Abs(f.Index - sort.Index) <= 2000);
+            if (nearFocused)
+            {
+                results.Add(BuildMatch(content, sort.Index, sort.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApUi005(string content)
+    {
+        var results = new List<RuleMatch>();
+        var customizeMatches = Regex.Matches(content, "CustomizeElement", RegexOptions.IgnoreCase).Cast<Match>().ToList();
+        var wrapperMatches = Regex.Matches(content, "XpedeonCrudGrid", RegexOptions.IgnoreCase).Cast<Match>().ToList();
+
+        foreach (var customize in customizeMatches)
+        {
+            var nearWrapper = wrapperMatches.Any(wrapper => Math.Abs(wrapper.Index - customize.Index) <= 500);
+            if (nearWrapper)
+            {
+                results.Add(BuildMatch(content, customize.Index, customize.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApUi006(string content)
+    {
+        var results = new List<RuleMatch>();
+        var gridMatches = Regex.Matches(content, "<DxGrid\\b[^>]*>", RegexOptions.IgnoreCase);
+        var crudSignals = new[]
+        {
+            "EditModelSaving",
+            "EditNewRowPosition",
+            "CustomizeEditModel",
+            "UnsavedChanges",
+            "OnDelete"
+        };
+
+        foreach (Match gridMatch in gridMatches)
+        {
+            var windowLength = Math.Min(3000, content.Length - gridMatch.Index);
+            var block = content.Substring(gridMatch.Index, windowLength);
+            var hasCrudSignal = crudSignals.Any(signal => block.Contains(signal, StringComparison.OrdinalIgnoreCase));
+            if (!hasCrudSignal)
+            {
+                continue;
+            }
+
+            var hasShowAllRows = block.Contains("ShowAllRows=\"true\"", StringComparison.OrdinalIgnoreCase);
+            var hasEditModelSaving = block.Contains("EditModelSaving", StringComparison.OrdinalIgnoreCase);
+            if (hasShowAllRows && !hasEditModelSaving)
+            {
+                continue;
+            }
+
+            results.Add(BuildMatch(content, gridMatch.Index, gridMatch.Length));
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApUi007(string content)
+    {
+        return RegexMatches(content, @"FormModel\.(Headers|Accounts|EntityRoleLinks)\s*=\s*");
+    }
+
+    private static List<RuleMatch> DetectApUi008(string content)
+    {
+        var results = new List<RuleMatch>();
+        var blocks = GetComboSettingsBlocks(content);
+        foreach (var block in blocks)
+        {
+            var hasValueField = Regex.IsMatch(block.Text, "ValueFieldName\\s*=", RegexOptions.IgnoreCase);
+            var hasDisplayText = Regex.IsMatch(block.Text, "TextFieldName\\s*=\\s*(?:\"DisplayText\"|'DisplayText')", RegexOptions.IgnoreCase);
+            if (hasValueField && !hasDisplayText)
+            {
+                results.Add(BuildMatch(content, block.Index, block.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApUi009(string content)
+    {
+        var results = new List<RuleMatch>();
+        var blockRegex = new Regex("<CellEditTemplate\\b[^>]*>([\\s\\S]*?)</CellEditTemplate>", RegexOptions.IgnoreCase);
+        var comboRegex = new Regex("<DxComboBox\\b(?!Settings)[^>]*>", RegexOptions.IgnoreCase);
+
+        foreach (Match blockMatch in blockRegex.Matches(content))
+        {
+            var blockText = blockMatch.Value;
+            foreach (Match comboMatch in comboRegex.Matches(blockText))
+            {
+                var hasFlag = Regex.IsMatch(comboMatch.Value, "EnableValidation\\s*=\\s*(?:\"false\"|'false')", RegexOptions.IgnoreCase);
+                if (!hasFlag)
+                {
+                    var absoluteIndex = blockMatch.Index + comboMatch.Index;
+                    results.Add(BuildMatch(content, absoluteIndex, comboMatch.Length));
+                }
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApUi010(string content)
+    {
+        return RegexMatches(content, "CaptionPosition\\.Horizontal");
+    }
+
+    private static List<RuleMatch> DetectApUi011(string content)
+    {
+        return RegexMatches(content, "ColSpanMd");
+    }
+
+    private static List<RuleMatch> DetectApUi012(string content)
+    {
+        return RegexMatches(content, "(?<!Edit)NewItemRowPosition\\b");
+    }
+
+    private static List<RuleMatch> DetectApUi013(string content)
+    {
+        return RegexMatches(content, "<DxTabPage[^>]*\\bVisible\\s*=");
+    }
+
+    private static List<RuleMatch> DetectApBe001(string content)
+    {
+        var fromSqlMatches = Regex.Matches(content, "FromSqlInterpolated|FromSqlRaw", RegexOptions.IgnoreCase);
+        if (fromSqlMatches.Count == 0)
+        {
+            return new List<RuleMatch>();
+        }
+
+        var hasMultiResultSignal = Regex.IsMatch(
+            content,
+            "SPN_FC_GET_SUBLEDGER_TYPE|multi-result|NextResult|3 result sets|multiple result",
+            RegexOptions.IgnoreCase);
+
+        if (!hasMultiResultSignal)
+        {
+            return new List<RuleMatch>();
+        }
+
+        return fromSqlMatches.Cast<Match>().Select(m => BuildMatch(content, m.Index, m.Length)).ToList();
+    }
+
+    private static List<RuleMatch> DetectApBe002(string content)
+    {
+        var normalized = content.ToLowerInvariant();
+        var hasMigration = normalized.Contains("migration");
+        var hasRowVersion = normalized.Contains("row_version");
+        var hasExemption =
+            normalized.Contains("already present") ||
+            normalized.Contains("already added") ||
+            normalized.Contains("removed") ||
+            normalized.Contains("no migration required");
+
+        if (hasMigration && hasRowVersion && !hasExemption)
+        {
+            var index = normalized.IndexOf("row_version", StringComparison.Ordinal);
+            if (index < 0)
+            {
+                index = normalized.IndexOf("migration", StringComparison.Ordinal);
+            }
+            return new List<RuleMatch> { BuildMatch(content, Math.Max(0, index), 20) };
+        }
+
+        return new List<RuleMatch>();
+    }
+
+    private static List<RuleMatch> DetectApBe003(string content)
+    {
+        return RegexMatches(content, @"\(int\)\s*(SubledgerApplicableTo|ApplicableTo)|SubledgerApplicableTo.*\(int\)");
+    }
+
+    private static List<RuleMatch> DetectApBe004(string content)
+    {
+        var results = new List<RuleMatch>();
+        var toTableRegex = new Regex("\\.ToTable\\(\"(?<table>FC_SUBLEDGER_TYPE|FC_SUB_LED_ACCOUNT|FC_SUBLEDGER_ENTITY_ROLES)\"\\)", RegexOptions.IgnoreCase);
+        foreach (Match match in toTableRegex.Matches(content))
+        {
+            var start = Math.Max(0, match.Index - 380);
+            var length = Math.Min(content.Length - start, 760);
+            var snippet = content.Substring(start, length);
+            var hasTrigger = Regex.IsMatch(snippet, "HasTrigger", RegexOptions.IgnoreCase);
+            if (!hasTrigger)
+            {
+                results.Add(BuildMatch(content, match.Index, match.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApBe005(string content)
+    {
+        var hasTargetField = Regex.IsMatch(content, "CostAccountLineNumber|CostCode|EntityRoleNo", RegexOptions.IgnoreCase);
+        var hasMapperContext = Regex.IsMatch(content, "\\bmapper\\b|\\bmap\\b", RegexOptions.IgnoreCase);
+        var hasSentinelHandling = Regex.IsMatch(content, @"\?\?\s*0|\bHas[A-Za-z0-9_]*\b|\bhas_[A-Za-z0-9_]+\b", RegexOptions.IgnoreCase);
+
+        if (hasTargetField && hasMapperContext && !hasSentinelHandling)
+        {
+            var idx = Regex.Match(content, "CostAccountLineNumber|CostCode|EntityRoleNo", RegexOptions.IgnoreCase).Index;
+            return new List<RuleMatch> { BuildMatch(content, idx, 24) };
+        }
+
+        return new List<RuleMatch>();
+    }
+
+    private static List<RuleMatch> DetectApBe006(string content)
+    {
+        var hasRowVersion = Regex.IsMatch(content, "RowVersion|ROW_VERSION", RegexOptions.IgnoreCase);
+        var hasConfigContext = Regex.IsMatch(content, "Configuration|IEntityTypeConfiguration", RegexOptions.IgnoreCase);
+        var hasIsRowVersion = Regex.IsMatch(content, "IsRowVersion\\s*\\(\\s*\\)", RegexOptions.IgnoreCase);
+        var hasPropertyRowVersion = Regex.IsMatch(content, "\\.Property\\s*\\(.*RowVersion", RegexOptions.IgnoreCase);
+
+        if (hasRowVersion && hasConfigContext && !hasIsRowVersion && !hasPropertyRowVersion)
+        {
+            var idx = Regex.Match(content, "RowVersion|ROW_VERSION", RegexOptions.IgnoreCase).Index;
+            return new List<RuleMatch> { BuildMatch(content, idx, 20) };
+        }
+
+        return new List<RuleMatch>();
+    }
+
+    private static List<RuleMatch> DetectApBe007(string content)
+    {
+        var results = new List<RuleMatch>();
+        var paragraphs = Regex.Split(content, @"\r?\n\s*\r?\n");
+        var rpcPattern = "Get_AllChartOfAccountsList|Get_AllEntityRoles|Get_AllInternalEntities";
+        var changePattern = "add parameter|add filter|modify|extend";
+        var offset = 0;
+
+        foreach (var paragraph in paragraphs)
+        {
+            if (Regex.IsMatch(paragraph, rpcPattern, RegexOptions.IgnoreCase) &&
+                Regex.IsMatch(paragraph, changePattern, RegexOptions.IgnoreCase))
+            {
+                var idx = content.IndexOf(paragraph, offset, StringComparison.Ordinal);
+                if (idx < 0)
+                {
+                    idx = offset;
+                }
+                results.Add(BuildMatch(content, idx, Math.Min(30, paragraph.Length)));
+            }
+
+            offset += paragraph.Length + 1;
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApXc001(string content)
+    {
+        var results = new List<RuleMatch>();
+        var enumRegex = new Regex(@"enum\s+\w+\s*\{[\s\S]*?\}", RegexOptions.IgnoreCase);
+        foreach (Match enumMatch in enumRegex.Matches(content))
+        {
+            var hasDisplay = Regex.IsMatch(enumMatch.Value, @"\[Display\s*\(\s*Name", RegexOptions.IgnoreCase);
+            if (!hasDisplay)
+            {
+                results.Add(BuildMatch(content, enumMatch.Index, enumMatch.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApXc002(string content)
+    {
+        var results = new List<RuleMatch>();
+        var matches = Regex.Matches(content, "TextFieldName\\s*=\\s*(?:\"DisplayText\"|'DisplayText')", RegexOptions.IgnoreCase);
+        if (matches.Count == 0)
+        {
+            return results;
+        }
+
+        var hasExtension = Regex.IsMatch(content, "DisplayText\\s*=>|Extensions", RegexOptions.IgnoreCase);
+        if (!hasExtension)
+        {
+            foreach (Match match in matches)
+            {
+                results.Add(BuildMatch(content, match.Index, match.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<RuleMatch> DetectApXc003(string content)
+    {
+        var archetypes = new[]
+        {
+            "ContractPayOthElementsPage",
+            "SecurityRoleConfiguration",
+            "MemorandumAccountTypesPage"
+        };
+
+        var results = new List<RuleMatch>();
+        foreach (var archetype in archetypes)
+        {
+            foreach (Match match in Regex.Matches(content, Regex.Escape(archetype), RegexOptions.IgnoreCase))
+            {
+                results.Add(BuildMatch(content, match.Index, match.Length));
+            }
+        }
+
+        return results;
+    }
+
+    private static List<(int Index, int Length, string Text)> GetComboSettingsBlocks(string content)
+    {
+        var blocks = new List<(int Index, int Length, string Text)>();
+        var startRegex = new Regex("<DxComboBoxSettings\\b[^>]*>", RegexOptions.IgnoreCase);
+        var starts = startRegex.Matches(content).Cast<Match>().ToList();
+        if (starts.Count == 0)
+        {
+            return blocks;
+        }
+
+        const string closeTag = "</DxComboBoxSettings>";
+        for (var i = 0; i < starts.Count; i++)
+        {
+            var start = starts[i].Index;
+            var nextStart = i + 1 < starts.Count ? starts[i + 1].Index : content.Length;
+            var closeIndex = content.IndexOf(closeTag, start, StringComparison.OrdinalIgnoreCase);
+            var end = closeIndex >= 0 && closeIndex < nextStart
+                ? closeIndex + closeTag.Length
+                : nextStart;
+
+            var length = Math.Max(0, end - start);
+            var text = length > 0 ? content.Substring(start, length) : string.Empty;
+            blocks.Add((start, length, text));
+        }
+
+        return blocks;
+    }
+
+    private static List<RuleMatch> RegexMatches(string content, string pattern)
+    {
+        return Regex.Matches(content, pattern, RegexOptions.IgnoreCase)
+            .Cast<Match>()
+            .Select(match => BuildMatch(content, match.Index, match.Length))
+            .ToList();
+    }
+
+    private static RuleMatch BuildMatch(string content, int index, int matchLength)
+    {
+        var safeIndex = Math.Clamp(index, 0, Math.Max(0, content.Length - 1));
+        var safeLength = Math.Max(1, matchLength);
+        var snippet = BuildContextSnippet(content, safeIndex, safeLength);
+        var matched = content.Substring(safeIndex, Math.Min(safeLength, content.Length - safeIndex));
+
+        return new RuleMatch
+        {
+            Index = safeIndex,
+            Matched = matched,
+            Context = snippet
+        };
+    }
+
+    private static string BuildContextSnippet(string content, int index, int matchLength, int radius = 68)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return string.Empty;
+        }
+
+        var start = Math.Max(0, index - radius);
+        var end = Math.Min(content.Length, index + matchLength + radius);
+        var slice = content[start..end];
+        return Regex.Replace(slice, @"\s+", " ").Trim();
+    }
+
+    // ============================================================
+    // SECTION 4: REVISION PROMPT GENERATOR
+    // ============================================================
+    private string BuildRevisionPrompt()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("The following violations were found in your implementation plan.");
+        sb.AppendLine("For each violation, the canonical fix is provided. Please revise the indicated sections:");
+        sb.AppendLine();
+
+        var totalViolations = 0;
+        var totalErrors = 0;
+        var totalWarnings = 0;
+        var totalInfo = 0;
+        var cleanSections = 0;
+        var sectionsNeedingRevision = new List<string>();
+
+        foreach (var section in Sections)
+        {
+            var violations = GetViolationsForSection(section.Id);
+            sb.AppendLine($"## Section {section.Letter} - {section.Heading}");
+
+            if (violations.Count == 0)
+            {
+                cleanSections++;
+                sb.AppendLine("No violations found. [OK]");
+                sb.AppendLine();
+                continue;
+            }
+
+            sectionsNeedingRevision.Add(section.Letter);
+            for (var i = 0; i < violations.Count; i++)
+            {
+                var violation = violations[i];
+                var severityUpper = violation.Severity.ToUpperInvariant();
+                var matchedSnippet = Truncate(violation.Matched, 80);
+
+                sb.AppendLine($"{i + 1}. **[{violation.RuleId}] {severityUpper}** - {violation.Title}");
+                sb.AppendLine($"   Matched: `{matchedSnippet}`");
+                sb.AppendLine($"   Fix: {violation.Fix}");
+                sb.AppendLine($"   Reason: {violation.Reason}");
+                sb.AppendLine();
+
+                totalViolations++;
+                if (IsSeverity(violation.Severity, "error"))
+                {
+                    totalErrors++;
+                }
+                else if (IsSeverity(violation.Severity, "warning"))
+                {
+                    totalWarnings++;
+                }
+                else if (IsSeverity(violation.Severity, "info"))
+                {
+                    totalInfo++;
+                }
+            }
+        }
+
+        sb.AppendLine("---");
+        sb.AppendLine();
+        sb.AppendLine("## Summary");
+        sb.AppendLine($"- Total violations: {totalViolations}");
+        sb.AppendLine($"- Errors: {totalErrors}");
+        sb.AppendLine($"- Warnings: {totalWarnings}");
+        sb.AppendLine($"- Info: {totalInfo}");
+        sb.AppendLine($"- Clean sections: {cleanSections} / {Sections.Count}");
+        sb.AppendLine($"- Sections needing revision: {(sectionsNeedingRevision.Count == 0 ? "None" : string.Join(", ", sectionsNeedingRevision.Distinct()))}");
+        return sb.ToString();
+    }
+
+    // ============================================================
+    // SECTION 5: UI COMPONENTS (panels, badges, modal)
+    // ============================================================
+    private static string TruncateForDisplay(string text, int maxLength)
+    {
+        return Truncate(text, maxLength);
+    }
+
+    private static string Truncate(string text, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = Regex.Replace(text.Trim(), @"\s+", " ");
+        return normalized.Length <= maxLength
+            ? normalized
+            : normalized[..maxLength].TrimEnd() + "...";
+    }
+
+    // ============================================================
+    // SECTION 6: MAIN APP (default export equivalent for Blazor page)
+    // ============================================================
+    private sealed class SectionModel
+    {
+        public string Id { get; init; } = string.Empty;
+        public string Letter { get; init; } = string.Empty;
+        public string Heading { get; init; } = string.Empty;
+        public int LineStart { get; init; }
+        public int LineCount { get; init; }
+        public string Content { get; init; } = string.Empty;
+    }
+
+    private sealed class RuleMatch
+    {
+        public int Index { get; init; }
+        public string Matched { get; init; } = string.Empty;
+        public string Context { get; init; } = string.Empty;
+    }
+
+    private sealed class AntipatternRule
+    {
+        public string Id { get; init; } = string.Empty;
+        public string Category { get; init; } = string.Empty;
+        public string Severity { get; init; } = string.Empty;
+        public string Title { get; init; } = string.Empty;
+        public Func<string, List<RuleMatch>> Detect { get; init; } = _ => new List<RuleMatch>();
+        public string Fix { get; init; } = string.Empty;
+        public string Reason { get; init; } = string.Empty;
+    }
+
+    private sealed class Violation
+    {
+        public string RuleId { get; init; } = string.Empty;
+        public string Severity { get; init; } = string.Empty;
+        public string Title { get; init; } = string.Empty;
+        public string Matched { get; init; } = string.Empty;
+        public string Fix { get; init; } = string.Empty;
+        public string Reason { get; init; } = string.Empty;
+    }
+
+    private sealed class SectionStatus
+    {
+        public string BadgeText { get; init; } = string.Empty;
+        public string CssClass { get; init; } = string.Empty;
+    }
+}
