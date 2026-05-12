@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.5.11723.231 stable
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartReviewSystem", "SmartReviewSystem.csproj", "{BE12374A-29E2-680C-B1A1-C3FCE256471F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BE12374A-29E2-680C-B1A1-C3FCE256471F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BE12374A-29E2-680C-B1A1-C3FCE256471F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BE12374A-29E2-680C-B1A1-C3FCE256471F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BE12374A-29E2-680C-B1A1-C3FCE256471F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C1287258-5732-4610-9EBC-BB4A153AF561}
+	EndGlobalSection
+EndGlobal
