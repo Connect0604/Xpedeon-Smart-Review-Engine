@@ -3,6 +3,10 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
+using Microsoft.Extensions.Configuration;
+using SmartReviewSystem.Models.DevOps;
+using SmartReviewSystem.Models.Ui;
+using SmartReviewSystem.Services.DevOps;
 
 namespace SmartReviewSystem.Pages;
 
@@ -10,6 +14,10 @@ public partial class Home : ComponentBase
 {
     [Inject]
     private IJSRuntime JS { get; set; } = default!;
+    [Inject]
+    private IAzureDevOpsService AzureDevOpsService { get; set; } = default!;
+    [Inject]
+    private IConfiguration Configuration { get; set; } = default!;
 
     private readonly IReadOnlyList<string> SeverityOrder = new[] { "error", "warning", "info" };
 
@@ -17,7 +25,17 @@ public partial class Home : ComponentBase
     {
         All,
         Issues,
-        Clean
+        Clean,
+        ReviewRequired,
+        CustomPattern
+    }
+
+    private sealed record ConfiguredSectionTab(string Name, IReadOnlyList<string> Patterns);
+
+    private enum UploadSource
+    {
+        Local,
+        AzureDevOps
     }
 
     // ============================================================
@@ -36,13 +54,82 @@ public partial class Home : ComponentBase
     private string? SelectedSectionId;
     private string SectionSearchText = string.Empty;
     private SectionFilterMode SectionFilter = SectionFilterMode.All;
+    private readonly List<ConfiguredSectionTab> ConfiguredSectionTabs = new();
+    private string? ActiveCustomTabName;
     private bool IsDragging;
     private bool IsViolationsPanelCollapsed;
     private bool ShowRevisionModal;
     private string RevisionPromptText = string.Empty;
     private string CopyButtonLabel = "Copy to Clipboard";
+    private UploadSource CurrentUploadSource = UploadSource.AzureDevOps;
+    private string DevOpsOrganization = string.Empty;
+    private string DevOpsProject = string.Empty;
+    private string DevOpsPatToken = string.Empty;
+    private string DevOpsCondition = "[System.WorkItemType] = 'User Story' AND [System.State] <> 'Closed'";
+    private string DevOpsBuiltQuery = string.Empty;
+    private bool UseAdvancedWiql;
+    private string DevOpsTagFilter = "Master AI Development";
+    private string DevOpsStateFilter = "Any";
+    private string DevOpsAssignedFilter = string.Empty;
+    private bool DevOpsOnlyWithAttachments = true;
+    private string DevOpsStorySearch = string.Empty;
+    private string DevOpsError = string.Empty;
+    private bool IsLoadingStories;
+    private List<DevOpsStoryItem> DevOpsStories = new();
+    private int DevOpsTotalStories;
+    private int DevOpsStoriesWithAttachments;
+    private int DevOpsSupportedAttachmentCount;
+    private int DevOpsUnsupportedAttachmentCount;
+    private string DevOpsUnsupportedExtensionSummary = string.Empty;
+    private string DevOpsConnectionStatus = "Idle";
+    private bool IsDevOpsFiltersCollapsed = true;
+
+    protected override void OnInitialized()
+    {
+        var options = Configuration.GetSection("DevOps").Get<DevOpsOptions>() ?? new DevOpsOptions();
+        DevOpsOrganization = options.Organization;
+        DevOpsProject = options.Project;
+        DevOpsPatToken = options.PatToken;
+        DevOpsCondition = string.IsNullOrWhiteSpace(options.WiqlCondition)
+            ? "[System.WorkItemType] = 'User Story' AND [System.State] <> 'Closed'"
+            : options.WiqlCondition;
+        DevOpsBuiltQuery = DevOpsCondition;
+        LoadConfiguredSectionTabsFromSettings();
+    }
+
+    private IEnumerable<DevOpsStoryItem> FilteredDevOpsStories
+    {
+        get
+        {
+            IEnumerable<DevOpsStoryItem> query = DevOpsStories;
+
+            if (DevOpsOnlyWithAttachments)
+            {
+                query = query.Where(story => story.Attachments.Count > 0);
+            }
+
+            var search = DevOpsStorySearch.Trim();
+            if (string.IsNullOrWhiteSpace(search))
+            {
+                return query.OrderByDescending(story => story.Id);
+            }
+
+            return query
+                .Where(story =>
+                    story.Id.ToString().Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    story.Title.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    story.AssignedTo.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    story.Tags.Contains(search, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(story => story.Id);
+        }
+    }
 
     private bool HasFileLoaded => Sections.Count > 0;
+    private string ActiveContextLabel => HasFileLoaded
+        ? UploadedFileName ?? "Analysis loaded"
+        : CurrentUploadSource == UploadSource.AzureDevOps
+            ? "Azure DevOps source"
+            : "Local upload source";
     private SectionModel? CurrentSection => Sections.FirstOrDefault(s => s.Id == SelectedSectionId);
     private int TotalIssueCount => ViolationsBySection.Values.Sum(violations => violations.Count);
     private int CleanSectionCount => Sections.Count(section => GetViolationsForSection(section.Id).Count == 0);
@@ -57,6 +144,10 @@ public partial class Home : ComponentBase
             {
                 SectionFilterMode.Issues => Sections.Where(section => GetViolationsForSection(section.Id).Count > 0),
                 SectionFilterMode.Clean => Sections.Where(section => GetViolationsForSection(section.Id).Count == 0),
+                SectionFilterMode.ReviewRequired => Sections.Where(section =>
+                    section.Heading.Contains("review", StringComparison.OrdinalIgnoreCase) ||
+                    section.Content.Contains("review", StringComparison.OrdinalIgnoreCase)),
+                SectionFilterMode.CustomPattern => GetCustomPatternSections(),
                 _ => Sections
             };
 
@@ -68,6 +159,35 @@ public partial class Home : ComponentBase
             }
 
             return sections;
+        }
+    }
+
+    private bool ShouldShowDefaultReviewRequiredTab =>
+        ConfiguredSectionTabs.All(tab => !tab.Name.Equals("Review Required", StringComparison.OrdinalIgnoreCase));
+
+    private IReadOnlyList<string> ActiveHighlightTerms
+    {
+        get
+        {
+            var search = SectionSearchText.Trim();
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                return new[] { search };
+            }
+
+            if (SectionFilter == SectionFilterMode.ReviewRequired)
+            {
+                return new[] { "review" };
+            }
+
+            if (SectionFilter == SectionFilterMode.CustomPattern && !string.IsNullOrWhiteSpace(ActiveCustomTabName))
+            {
+                var configuredTab = ConfiguredSectionTabs.FirstOrDefault(tab =>
+                    tab.Name.Equals(ActiveCustomTabName, StringComparison.OrdinalIgnoreCase));
+                return configuredTab?.Patterns ?? Array.Empty<string>();
+            }
+
+            return Array.Empty<string>();
         }
     }
 
@@ -116,28 +236,182 @@ public partial class Home : ComponentBase
             using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
             using var reader = new StreamReader(stream);
             var content = await reader.ReadToEndAsync();
-
-            UploadedFileName = file.Name;
-            Sections.Clear();
-            Sections.AddRange(ParseSections(content));
-            SelectedSectionId = Sections.FirstOrDefault()?.Id;
-            var activeProfiles = DetectActiveRuleProfiles(content, file.Name);
-            ViolationsBySection = RunAllRules(Sections, Rulebook, activeProfiles);
-            ExpandedReasonKeys.Clear();
-            SectionSearchText = string.Empty;
-            SectionFilter = SectionFilterMode.All;
-            IsViolationsPanelCollapsed = false;
-            ShowRevisionModal = false;
-            CopyButtonLabel = "Copy to Clipboard";
-
-            if (Sections.Count == 0)
-            {
-                UploadError = "The uploaded file has no parsable sections.";
-            }
+            ProcessUploadedContent(file.Name, content);
         }
         catch (Exception ex)
         {
             UploadError = $"Failed to read file: {ex.Message}";
+        }
+    }
+
+    private async Task LoadStoriesFromDevOpsAsync()
+    {
+        DevOpsError = string.Empty;
+        UploadError = string.Empty;
+        DevOpsStories = new List<DevOpsStoryItem>();
+        DevOpsTotalStories = 0;
+        DevOpsStoriesWithAttachments = 0;
+        DevOpsSupportedAttachmentCount = 0;
+        DevOpsUnsupportedAttachmentCount = 0;
+        DevOpsUnsupportedExtensionSummary = string.Empty;
+        DevOpsConnectionStatus = "Loading";
+        DevOpsBuiltQuery = UseAdvancedWiql ? DevOpsCondition.Trim() : BuildGuidedWiqlCondition();
+
+        if (string.IsNullOrWhiteSpace(DevOpsOrganization) || string.IsNullOrWhiteSpace(DevOpsProject) || string.IsNullOrWhiteSpace(DevOpsPatToken))
+        {
+            DevOpsError = "Organization, project, and PAT token are required.";
+            DevOpsConnectionStatus = "Failed";
+            return;
+        }
+
+        IsLoadingStories = true;
+        try
+        {
+            DevOpsStories = await AzureDevOpsService.GetStoriesWithAttachmentsAsync(
+                DevOpsOrganization.Trim(),
+                DevOpsProject.Trim(),
+                DevOpsPatToken.Trim(),
+                DevOpsBuiltQuery,
+                CancellationToken.None);
+
+            DevOpsTotalStories = DevOpsStories.Count;
+            DevOpsStoriesWithAttachments = DevOpsStories.Count(s => s.Attachments.Count > 0);
+            DevOpsSupportedAttachmentCount = DevOpsStories.Sum(s => s.Attachments.Count(a => a.IsSupported));
+            DevOpsUnsupportedAttachmentCount = DevOpsStories.Sum(s => s.Attachments.Count(a => !a.IsSupported));
+            DevOpsUnsupportedExtensionSummary = string.Join(", ",
+                DevOpsStories
+                    .SelectMany(s => s.Attachments)
+                    .Where(a => !a.IsSupported)
+                    .GroupBy(a => a.Extension)
+                    .OrderByDescending(g => g.Count())
+                    .Take(6)
+                    .Select(g => $"{g.Key} ({g.Count()})"));
+
+            if (DevOpsTotalStories == 0)
+            {
+                DevOpsError = "No user stories matched this WIQL condition.";
+                DevOpsConnectionStatus = "Connected";
+            }
+            else if (DevOpsSupportedAttachmentCount == 0)
+            {
+                DevOpsError = "Connected successfully, but none of the fetched stories has supported text attachments (.md/.txt/.markdown).";
+                DevOpsConnectionStatus = "Connected";
+            }
+            else
+            {
+                DevOpsConnectionStatus = "Connected";
+            }
+        }
+        catch (Exception ex)
+        {
+            DevOpsError = $"Failed to load stories: {ex.Message}";
+            DevOpsConnectionStatus = "Failed";
+        }
+        finally
+        {
+            IsLoadingStories = false;
+        }
+    }
+
+    private async Task AnalyzeDevOpsAttachmentAsync(DevOpsStoryItem story, DevOpsAttachmentItem attachment)
+    {
+        UploadError = string.Empty;
+        DevOpsError = string.Empty;
+        if (!attachment.IsSupported)
+        {
+            DevOpsError = $"Attachment '{attachment.Name}' is not a supported text file (.md/.txt/.markdown).";
+            return;
+        }
+
+        try
+        {
+            if (IsHtmlAttachment(attachment.Name))
+            {
+                var htmlContent = await AzureDevOpsService.DownloadAttachmentTextAsync(attachment.Url, DevOpsPatToken.Trim(), CancellationToken.None);
+                try
+                {
+                    await JS.InvokeVoidAsync("smartReview.openHtmlInNewTab", htmlContent, attachment.Name);
+                }
+                catch
+                {
+                    await JS.InvokeVoidAsync("openHtmlInNewTab", htmlContent, attachment.Name);
+                }
+                return;
+            }
+
+            var content = await AzureDevOpsService.DownloadAttachmentTextAsync(attachment.Url, DevOpsPatToken.Trim(), CancellationToken.None);
+            var fileName = $"US-{story.Id}-{attachment.Name}";
+            ProcessUploadedContent(fileName, content);
+        }
+        catch (Exception ex)
+        {
+            DevOpsError = $"Failed to analyze attachment '{attachment.Name}': {ex.Message}";
+        }
+    }
+
+    private static bool IsHtmlAttachment(string fileName)
+    {
+        var ext = Path.GetExtension(fileName);
+        return string.Equals(ext, ".html", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ext, ".htm", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string EscapeWiqlLiteral(string value)
+    {
+        return value.Replace("'", "''", StringComparison.Ordinal);
+    }
+
+    private string BuildGuidedWiqlCondition()
+    {
+        var conditions = new List<string>
+        {
+            "[System.WorkItemType] = 'User Story'"
+        };
+
+        if (!string.IsNullOrWhiteSpace(DevOpsTagFilter))
+        {
+            conditions.Add($"[System.Tags] CONTAINS '{EscapeWiqlLiteral(DevOpsTagFilter.Trim())}'");
+        }
+
+        if (!string.Equals(DevOpsStateFilter, "Any", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(DevOpsStateFilter))
+        {
+            conditions.Add($"[System.State] = '{EscapeWiqlLiteral(DevOpsStateFilter.Trim())}'");
+        }
+
+        if (!string.IsNullOrWhiteSpace(DevOpsAssignedFilter))
+        {
+            conditions.Add($"[System.AssignedTo] CONTAINS '{EscapeWiqlLiteral(DevOpsAssignedFilter.Trim())}'");
+        }
+
+        return string.Join(" AND ", conditions);
+    }
+
+    private void SetUploadSource(UploadSource source)
+    {
+        CurrentUploadSource = source;
+        UploadError = string.Empty;
+        DevOpsError = string.Empty;
+    }
+
+    private void ProcessUploadedContent(string fileName, string content)
+    {
+        UploadedFileName = fileName;
+        ActiveCustomTabName = null;
+        Sections.Clear();
+        Sections.AddRange(ParseSections(content));
+        SelectedSectionId = Sections.FirstOrDefault()?.Id;
+        var activeProfiles = DetectActiveRuleProfiles(content, fileName);
+        ViolationsBySection = RunAllRules(Sections, Rulebook, activeProfiles);
+        ExpandedReasonKeys.Clear();
+        SectionSearchText = string.Empty;
+        SectionFilter = SectionFilterMode.All;
+        IsViolationsPanelCollapsed = false;
+        ShowRevisionModal = false;
+        CopyButtonLabel = "Copy to Clipboard";
+
+        if (Sections.Count == 0)
+        {
+            UploadError = "The uploaded file has no parsable sections.";
         }
     }
 
@@ -151,10 +425,19 @@ public partial class Home : ComponentBase
         ExpandedReasonKeys.Clear();
         SectionSearchText = string.Empty;
         SectionFilter = SectionFilterMode.All;
+        ActiveCustomTabName = null;
         IsViolationsPanelCollapsed = false;
         ShowRevisionModal = false;
         RevisionPromptText = string.Empty;
         CopyButtonLabel = "Copy to Clipboard";
+        DevOpsError = string.Empty;
+        DevOpsTotalStories = 0;
+        DevOpsStoriesWithAttachments = 0;
+        DevOpsSupportedAttachmentCount = 0;
+        DevOpsUnsupportedAttachmentCount = 0;
+        DevOpsUnsupportedExtensionSummary = string.Empty;
+        DevOpsConnectionStatus = "Idle";
+        DevOpsBuiltQuery = string.Empty;
     }
 
     private void SelectSection(string sectionId)
@@ -165,6 +448,93 @@ public partial class Home : ComponentBase
     private void SetSectionFilter(SectionFilterMode filter)
     {
         SectionFilter = filter;
+        if (filter != SectionFilterMode.CustomPattern)
+        {
+            ActiveCustomTabName = null;
+        }
+    }
+
+    private void SetCustomSectionFilter(string tabName)
+    {
+        ActiveCustomTabName = tabName;
+        SectionFilter = SectionFilterMode.CustomPattern;
+    }
+
+    private IEnumerable<SectionModel> GetCustomPatternSections()
+    {
+        if (string.IsNullOrWhiteSpace(ActiveCustomTabName))
+        {
+            return Sections;
+        }
+
+        var configuredTab = ConfiguredSectionTabs.FirstOrDefault(tab =>
+            tab.Name.Equals(ActiveCustomTabName, StringComparison.OrdinalIgnoreCase));
+
+        if (configuredTab is null || configuredTab.Patterns.Count == 0)
+        {
+            return Sections;
+        }
+
+        return Sections.Where(section => configuredTab.Patterns.Any(pattern =>
+            section.Heading.Contains(pattern, StringComparison.OrdinalIgnoreCase) ||
+            section.Content.Contains(pattern, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private void LoadConfiguredSectionTabsFromSettings()
+    {
+        ConfiguredSectionTabs.Clear();
+        var options = Configuration.GetSection("SectionTabs").Get<List<SectionFilterTabOptions>>() ?? new List<SectionFilterTabOptions>();
+        foreach (var option in options)
+        {
+            var tabName = NormalizeWhitespace(option.Tab);
+            var patterns = BuildConfiguredPatterns(option);
+            if (string.IsNullOrWhiteSpace(tabName) || patterns.Count == 0)
+            {
+                continue;
+            }
+
+            if (ConfiguredSectionTabs.Any(tab => tab.Name.Equals(tabName, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            ConfiguredSectionTabs.Add(new ConfiguredSectionTab(tabName, patterns));
+        }
+    }
+
+    private static List<string> BuildConfiguredPatterns(SectionFilterTabOptions option)
+    {
+        var values = new List<string>();
+        if (!string.IsNullOrWhiteSpace(option.Patten))
+        {
+            values.Add(option.Patten);
+        }
+
+        if (!string.IsNullOrWhiteSpace(option.Pattern))
+        {
+            values.Add(option.Pattern);
+        }
+
+        if (option.Pattens is not null)
+        {
+            values.AddRange(option.Pattens);
+        }
+
+        if (option.Patterns is not null)
+        {
+            values.AddRange(option.Patterns);
+        }
+
+        return values
+            .Select(NormalizeWhitespace)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string NormalizeWhitespace(string value)
+    {
+        return Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
     }
 
     private bool HasAdjacentIssue(int direction)
@@ -455,7 +825,7 @@ public partial class Home : ComponentBase
         return (letter, heading.Trim());
     }
 
-    private static string RenderMarkdown(string markdown)
+    private static string RenderMarkdown(string markdown, IReadOnlyList<string>? highlightTerms = null)
     {
         if (string.IsNullOrWhiteSpace(markdown))
         {
@@ -596,7 +966,42 @@ public partial class Home : ComponentBase
             }
         }
 
-        return sb.ToString();
+        var html = sb.ToString();
+        return HighlightSearchTermsInHtml(html, highlightTerms);
+    }
+
+    private static string HighlightSearchTermsInHtml(string html, IReadOnlyList<string>? highlightTerms)
+    {
+        var terms = (highlightTerms ?? Array.Empty<string>())
+            .Select(term => (term ?? string.Empty).Trim())
+            .Where(term => !string.IsNullOrWhiteSpace(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(term => term.Length)
+            .ToList();
+
+        if (terms.Count == 0)
+        {
+            return html;
+        }
+
+        var safePattern = string.Join("|", terms.Select(Regex.Escape));
+        var tokenized = Regex.Split(html, "(<[^>]+>)");
+        for (var i = 0; i < tokenized.Length; i++)
+        {
+            var token = tokenized[i];
+            if (string.IsNullOrWhiteSpace(token) || token.StartsWith("<", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            tokenized[i] = Regex.Replace(
+                token,
+                safePattern,
+                "<mark class=\"srs-search-hit\">$0</mark>",
+                RegexOptions.IgnoreCase);
+        }
+
+        return string.Concat(tokenized);
     }
 
     private static bool TryRenderHeading(string line, StringBuilder sb)
@@ -2113,16 +2518,13 @@ public partial class Home : ComponentBase
         foreach (var section in Sections)
         {
             var violations = GetViolationsForSection(section.Id);
-            sb.AppendLine($"## Section {section.Letter} - {section.Heading}");
-
             if (violations.Count == 0)
             {
                 cleanSections++;
-                sb.AppendLine("No violations found. [OK]");
-                sb.AppendLine();
                 continue;
             }
 
+            sb.AppendLine($"## Section {section.Letter} - {section.Heading}");
             sectionsNeedingRevision.Add(section.Letter);
             for (var i = 0; i < violations.Count; i++)
             {
@@ -2150,6 +2552,8 @@ public partial class Home : ComponentBase
                     totalInfo++;
                 }
             }
+
+            sb.AppendLine();
         }
 
         sb.AppendLine("---");
