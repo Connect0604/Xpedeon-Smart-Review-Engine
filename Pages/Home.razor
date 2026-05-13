@@ -239,10 +239,21 @@ else
                         <div class="srs-sidebar-summary">@CleanSectionCount clean / @Sections.Count total</div>
                     </div>
                 </div>
-                <input class="srs-section-search"
-                       placeholder="Search sections"
-                       @bind="SectionSearchText"
-                       @bind:event="oninput" />
+                <div class="srs-search-wrap">
+                    <input class="srs-section-search"
+                           placeholder="Search sections"
+                           @bind="SectionSearchText"
+                           @bind:event="oninput" />
+                    @if (!string.IsNullOrWhiteSpace(SectionSearchText))
+                    {
+                        <button type="button"
+                                class="srs-search-clear"
+                                @onclick="() => SectionSearchText = string.Empty"
+                                aria-label="Clear search">
+                            &times;
+                        </button>
+                    }
+                </div>
                 <div class="srs-filter-tabs" role="group" aria-label="Section filters">
                     <button type="button" class="@(SectionFilter == SectionFilterMode.All ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.All)">
                         All
@@ -253,9 +264,20 @@ else
                     <button type="button" class="@(SectionFilter == SectionFilterMode.Clean ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.Clean)">
                         Clean
                     </button>
-                    <button type="button" class="@(SectionFilter == SectionFilterMode.ReviewRequired ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.ReviewRequired)">
-                        Review Required
-                    </button>
+                    @if (ShouldShowDefaultReviewRequiredTab)
+                    {
+                        <button type="button" class="@(SectionFilter == SectionFilterMode.ReviewRequired ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.ReviewRequired)">
+                            Review Required
+                        </button>
+                    }
+                    @foreach (var customTab in ConfiguredSectionTabs)
+                    {
+                        <button type="button"
+                                class="@((SectionFilter == SectionFilterMode.CustomPattern && string.Equals(ActiveCustomTabName, customTab.Name, StringComparison.OrdinalIgnoreCase)) ? "active" : string.Empty)"
+                                @onclick="() => SetCustomSectionFilter(customTab.Name)">
+                            @customTab.Name
+                        </button>
+                    }
                 </div>
                 <div class="srs-sections-list">
                     @if (filteredSections.Count == 0)
@@ -319,7 +341,7 @@ else
                                     <span>Original markdown</span>
                                 </div>
                                 <div class="srs-markdown">
-                                    @((MarkupString)RenderMarkdown(selectedSection.Content, SectionSearchText))
+                                    @((MarkupString)RenderMarkdown(selectedSection.Content, ActiveHighlightTerms))
                                 </div>
                             </section>
                         </section>
@@ -402,4 +424,5 @@ else
         </div>
     </div>
 }
+
 

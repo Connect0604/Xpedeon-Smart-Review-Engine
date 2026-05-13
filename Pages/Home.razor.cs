@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
 using Microsoft.Extensions.Configuration;
 using SmartReviewSystem.Models.DevOps;
+using SmartReviewSystem.Models.Ui;
 using SmartReviewSystem.Services.DevOps;
 
 namespace SmartReviewSystem.Pages;
@@ -25,8 +26,11 @@ public partial class Home : ComponentBase
         All,
         Issues,
         Clean,
-        ReviewRequired
+        ReviewRequired,
+        CustomPattern
     }
+
+    private sealed record ConfiguredSectionTab(string Name, IReadOnlyList<string> Patterns);
 
     private enum UploadSource
     {
@@ -50,6 +54,8 @@ public partial class Home : ComponentBase
     private string? SelectedSectionId;
     private string SectionSearchText = string.Empty;
     private SectionFilterMode SectionFilter = SectionFilterMode.All;
+    private readonly List<ConfiguredSectionTab> ConfiguredSectionTabs = new();
+    private string? ActiveCustomTabName;
     private bool IsDragging;
     private bool IsViolationsPanelCollapsed;
     private bool ShowRevisionModal;
@@ -88,6 +94,7 @@ public partial class Home : ComponentBase
             ? "[System.WorkItemType] = 'User Story' AND [System.State] <> 'Closed'"
             : options.WiqlCondition;
         DevOpsBuiltQuery = DevOpsCondition;
+        LoadConfiguredSectionTabsFromSettings();
     }
 
     private IEnumerable<DevOpsStoryItem> FilteredDevOpsStories
@@ -140,6 +147,7 @@ public partial class Home : ComponentBase
                 SectionFilterMode.ReviewRequired => Sections.Where(section =>
                     section.Heading.Contains("review", StringComparison.OrdinalIgnoreCase) ||
                     section.Content.Contains("review", StringComparison.OrdinalIgnoreCase)),
+                SectionFilterMode.CustomPattern => GetCustomPatternSections(),
                 _ => Sections
             };
 
@@ -151,6 +159,35 @@ public partial class Home : ComponentBase
             }
 
             return sections;
+        }
+    }
+
+    private bool ShouldShowDefaultReviewRequiredTab =>
+        ConfiguredSectionTabs.All(tab => !tab.Name.Equals("Review Required", StringComparison.OrdinalIgnoreCase));
+
+    private IReadOnlyList<string> ActiveHighlightTerms
+    {
+        get
+        {
+            var search = SectionSearchText.Trim();
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                return new[] { search };
+            }
+
+            if (SectionFilter == SectionFilterMode.ReviewRequired)
+            {
+                return new[] { "review" };
+            }
+
+            if (SectionFilter == SectionFilterMode.CustomPattern && !string.IsNullOrWhiteSpace(ActiveCustomTabName))
+            {
+                var configuredTab = ConfiguredSectionTabs.FirstOrDefault(tab =>
+                    tab.Name.Equals(ActiveCustomTabName, StringComparison.OrdinalIgnoreCase));
+                return configuredTab?.Patterns ?? Array.Empty<string>();
+            }
+
+            return Array.Empty<string>();
         }
     }
 
@@ -359,6 +396,7 @@ public partial class Home : ComponentBase
     private void ProcessUploadedContent(string fileName, string content)
     {
         UploadedFileName = fileName;
+        ActiveCustomTabName = null;
         Sections.Clear();
         Sections.AddRange(ParseSections(content));
         SelectedSectionId = Sections.FirstOrDefault()?.Id;
@@ -387,6 +425,7 @@ public partial class Home : ComponentBase
         ExpandedReasonKeys.Clear();
         SectionSearchText = string.Empty;
         SectionFilter = SectionFilterMode.All;
+        ActiveCustomTabName = null;
         IsViolationsPanelCollapsed = false;
         ShowRevisionModal = false;
         RevisionPromptText = string.Empty;
@@ -409,6 +448,93 @@ public partial class Home : ComponentBase
     private void SetSectionFilter(SectionFilterMode filter)
     {
         SectionFilter = filter;
+        if (filter != SectionFilterMode.CustomPattern)
+        {
+            ActiveCustomTabName = null;
+        }
+    }
+
+    private void SetCustomSectionFilter(string tabName)
+    {
+        ActiveCustomTabName = tabName;
+        SectionFilter = SectionFilterMode.CustomPattern;
+    }
+
+    private IEnumerable<SectionModel> GetCustomPatternSections()
+    {
+        if (string.IsNullOrWhiteSpace(ActiveCustomTabName))
+        {
+            return Sections;
+        }
+
+        var configuredTab = ConfiguredSectionTabs.FirstOrDefault(tab =>
+            tab.Name.Equals(ActiveCustomTabName, StringComparison.OrdinalIgnoreCase));
+
+        if (configuredTab is null || configuredTab.Patterns.Count == 0)
+        {
+            return Sections;
+        }
+
+        return Sections.Where(section => configuredTab.Patterns.Any(pattern =>
+            section.Heading.Contains(pattern, StringComparison.OrdinalIgnoreCase) ||
+            section.Content.Contains(pattern, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private void LoadConfiguredSectionTabsFromSettings()
+    {
+        ConfiguredSectionTabs.Clear();
+        var options = Configuration.GetSection("SectionTabs").Get<List<SectionFilterTabOptions>>() ?? new List<SectionFilterTabOptions>();
+        foreach (var option in options)
+        {
+            var tabName = NormalizeWhitespace(option.Tab);
+            var patterns = BuildConfiguredPatterns(option);
+            if (string.IsNullOrWhiteSpace(tabName) || patterns.Count == 0)
+            {
+                continue;
+            }
+
+            if (ConfiguredSectionTabs.Any(tab => tab.Name.Equals(tabName, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            ConfiguredSectionTabs.Add(new ConfiguredSectionTab(tabName, patterns));
+        }
+    }
+
+    private static List<string> BuildConfiguredPatterns(SectionFilterTabOptions option)
+    {
+        var values = new List<string>();
+        if (!string.IsNullOrWhiteSpace(option.Patten))
+        {
+            values.Add(option.Patten);
+        }
+
+        if (!string.IsNullOrWhiteSpace(option.Pattern))
+        {
+            values.Add(option.Pattern);
+        }
+
+        if (option.Pattens is not null)
+        {
+            values.AddRange(option.Pattens);
+        }
+
+        if (option.Patterns is not null)
+        {
+            values.AddRange(option.Patterns);
+        }
+
+        return values
+            .Select(NormalizeWhitespace)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string NormalizeWhitespace(string value)
+    {
+        return Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
     }
 
     private bool HasAdjacentIssue(int direction)
@@ -699,7 +825,7 @@ public partial class Home : ComponentBase
         return (letter, heading.Trim());
     }
 
-    private static string RenderMarkdown(string markdown, string? highlightTerm = null)
+    private static string RenderMarkdown(string markdown, IReadOnlyList<string>? highlightTerms = null)
     {
         if (string.IsNullOrWhiteSpace(markdown))
         {
@@ -841,18 +967,24 @@ public partial class Home : ComponentBase
         }
 
         var html = sb.ToString();
-        return HighlightSearchTermInHtml(html, highlightTerm);
+        return HighlightSearchTermsInHtml(html, highlightTerms);
     }
 
-    private static string HighlightSearchTermInHtml(string html, string? highlightTerm)
+    private static string HighlightSearchTermsInHtml(string html, IReadOnlyList<string>? highlightTerms)
     {
-        var term = (highlightTerm ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(term))
+        var terms = (highlightTerms ?? Array.Empty<string>())
+            .Select(term => (term ?? string.Empty).Trim())
+            .Where(term => !string.IsNullOrWhiteSpace(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(term => term.Length)
+            .ToList();
+
+        if (terms.Count == 0)
         {
             return html;
         }
 
-        var safePattern = Regex.Escape(term);
+        var safePattern = string.Join("|", terms.Select(Regex.Escape));
         var tokenized = Regex.Split(html, "(<[^>]+>)");
         for (var i = 0; i < tokenized.Length; i++)
         {
@@ -1002,7 +1134,6 @@ public partial class Home : ComponentBase
         text = Regex.Replace(text, @"\*([^\n*]+?)\*", "<em>$1</em>");
         text = Regex.Replace(text, @"~~([^\n~]+?)~~", "<del>$1</del>");
         text = Regex.Replace(text, @"\[(.+?)\]\((.+?)\)", "<a href=\"$2\" target=\"_blank\" rel=\"noopener noreferrer\">$1</a>");
-        text = Regex.Replace(text, @"\b(review(?:ed|ing|s)?)\b", "<mark class=\"srs-review-hit\">$1</mark>", RegexOptions.IgnoreCase);
         return text;
     }
 
