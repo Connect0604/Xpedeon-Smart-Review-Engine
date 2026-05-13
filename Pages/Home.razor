@@ -5,25 +5,204 @@
 @if (!HasFileLoaded)
 {
     <div class="srs-upload-screen">
-        <div class="srs-dropzone @(IsDragging ? "dragging" : string.Empty)"
-             @ondragenter="OnDragEnter"
-             @ondragover="OnDragOver"
-             @ondragleave="OnDragLeave"
-             @ondrop="OnDrop"
-             @ondragenter:preventDefault="true"
-             @ondragover:preventDefault="true"
-             @ondragleave:preventDefault="true"
-             @ondrop:preventDefault="true">
-            <InputFile OnChange="HandleFileSelected" accept=".md,.txt,.markdown" class="srs-file-input" />
-            <div class="srs-upload-icon">UP</div>
-            <h2>Drop your .md plan file here</h2>
-            <p>or click to browse</p>
-            <p class="srs-upload-hint">Accepted: <code>.md</code>, <code>.txt</code>, <code>.markdown</code></p>
-            @if (!string.IsNullOrWhiteSpace(UploadError))
-            {
-                <p class="srs-error">@UploadError</p>
-            }
+        <div class="srs-workspace-header">
+            <div class="srs-workspace-row">
+                <div class="srs-source-switch" role="group" aria-label="Upload source">
+                    <button type="button" class="@(CurrentUploadSource == UploadSource.AzureDevOps ? "active" : string.Empty)" @onclick="() => SetUploadSource(UploadSource.AzureDevOps)">Azure DevOps</button>
+                    <button type="button" class="@(CurrentUploadSource == UploadSource.Local ? "active" : string.Empty)" @onclick="() => SetUploadSource(UploadSource.Local)">Local upload</button>
+                </div>
+                <div class="srs-context-pill">@ActiveContextLabel</div>
+            </div>
         </div>
+
+        @if (CurrentUploadSource == UploadSource.Local)
+        {
+            <div class="srs-dropzone @(IsDragging ? "dragging" : string.Empty)"
+                 @ondragenter="OnDragEnter"
+                 @ondragover="OnDragOver"
+                 @ondragleave="OnDragLeave"
+                 @ondrop="OnDrop"
+                 @ondragenter:preventDefault="true"
+                 @ondragover:preventDefault="true"
+                 @ondragleave:preventDefault="true"
+                 @ondrop:preventDefault="true">
+                <InputFile OnChange="HandleFileSelected" accept=".md,.txt,.markdown" class="srs-file-input" />
+                <div class="srs-upload-icon">UP</div>
+                <h2>Drop your .md plan file here</h2>
+                <p>or click to browse</p>
+                <p class="srs-upload-hint">Accepted: <code>.md</code>, <code>.txt</code>, <code>.markdown</code></p>
+            </div>
+        }
+        else
+        {
+            <div class="srs-devops-panel">
+                <div class="srs-panel-header">
+                    <h2>Azure DevOps Story Explorer</h2>
+                    <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => IsDevOpsFiltersCollapsed = !IsDevOpsFiltersCollapsed">
+                        @(IsDevOpsFiltersCollapsed ? "Show filters" : "Hide filters")
+                    </button>
+                </div>
+                @if (!IsDevOpsFiltersCollapsed)
+                {
+                    <div class="srs-devops-grid">
+                        <input class="srs-section-search" placeholder="Organization (e.g. your-org)" @bind="DevOpsOrganization" />
+                        <input class="srs-section-search" placeholder="Project" @bind="DevOpsProject" />
+                        <input class="srs-section-search" placeholder="PAT token (session only)" @bind="DevOpsPatToken" type="password" />
+                    </div>
+                    <div class="srs-guided-filters">
+                        <input class="srs-section-search" placeholder="Tag contains (e.g. Master AI Development)" @bind="DevOpsTagFilter" />
+                        <select class="srs-section-search" @bind="DevOpsStateFilter">
+                            <option value="Any">Any state</option>
+                            <option value="New">New</option>
+                            <option value="Active">Active</option>
+                            <option value="Resolved">Resolved</option>
+                            <option value="Closed">Closed</option>
+                            <option value="Testing Requested">Testing Requested</option>
+                        </select>
+                        <input class="srs-section-search" placeholder="Assigned to contains" @bind="DevOpsAssignedFilter" />
+                    </div>
+                    <div class="srs-devops-row">
+                        <label class="srs-toggle">
+                            <input type="checkbox" @bind="UseAdvancedWiql" />
+                            <span>Use advanced WIQL</span>
+                        </label>
+                        <label class="srs-toggle">
+                            <input type="checkbox" @bind="DevOpsOnlyWithAttachments" />
+                            <span>Only stories with attachments</span>
+                        </label>
+                        <span class="srs-connection @($"status-{DevOpsConnectionStatus.ToLowerInvariant()}")">Connection: @DevOpsConnectionStatus</span>
+                    </div>
+                    @if (UseAdvancedWiql)
+                    {
+                        <textarea class="srs-devops-condition" @bind="DevOpsCondition"></textarea>
+                    }
+                }
+                <button type="button" class="srs-btn srs-btn-primary srs-load-btn" @onclick="LoadStoriesFromDevOpsAsync" disabled="@IsLoadingStories">
+                    @(IsLoadingStories ? "Loading..." : "Load user stories")
+                </button>
+
+                @if (DevOpsTotalStories > 0)
+                {
+                    <div class="srs-metric-grid">
+                        <div class="srs-metric-card"><span>Stories</span><strong>@DevOpsTotalStories</strong></div>
+                        <div class="srs-metric-card"><span>With Attachments</span><strong>@DevOpsStoriesWithAttachments</strong></div>
+                        <div class="srs-metric-card"><span>Supported</span><strong>@DevOpsSupportedAttachmentCount</strong></div>
+                        <div class="srs-metric-card"><span>Unsupported</span><strong>@DevOpsUnsupportedAttachmentCount</strong></div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(DevOpsUnsupportedExtensionSummary))
+                    {
+                        <details class="srs-devops-note-panel">
+                            <summary>Why some files are not analyzable</summary>
+                            <div class="srs-devops-note">Unsupported types: @DevOpsUnsupportedExtensionSummary</div>
+                        </details>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(DevOpsBuiltQuery))
+                    {
+                        <div class="srs-devops-note">Query used: <code>@DevOpsBuiltQuery</code></div>
+                    }
+                }
+
+                @if (DevOpsStories.Count > 0)
+                {
+                    var filteredStories = FilteredDevOpsStories.ToList();
+                    <input class="srs-section-search srs-devops-search" placeholder="Search in fetched stories (ID, title, assignee, tags)" @bind="DevOpsStorySearch" @bind:event="oninput" />
+                    <div class="srs-story-list">
+                        <table class="srs-devops-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Work Item Type</th>
+                                    <th>Title</th>
+                                    <th>Assigned To</th>
+                                    <th>State</th>
+                                    <th>Tags</th>
+                                    <th>Attached Files</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var story in filteredStories)
+                                {
+                                    <tr>
+                                        <td>@story.Id</td>
+                                        <td>@story.WorkItemType</td>
+                                        <td>@story.Title</td>
+                                        <td>@story.AssignedTo</td>
+                                        <td>@story.State</td>
+                                        <td>@(string.IsNullOrWhiteSpace(story.Tags) ? "-" : story.Tags)</td>
+                                        <td>
+                                            @if (story.Attachments.Count == 0)
+                                            {
+                                                <span>No attachment</span>
+                                            }
+                                            else
+                                            {
+                                                <div class="srs-attachment-list">
+                                                    @foreach (var typeGroup in story.Attachments
+                                                        .Where(a => a.IsSupported)
+                                                        .OrderBy(a => a.Extension, StringComparer.OrdinalIgnoreCase)
+                                                        .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+                                                        .GroupBy(a => a.Extension, StringComparer.OrdinalIgnoreCase))
+                                                    {
+                                                        <details class="srs-filetype-group" open>
+                                                            <summary>type: @typeGroup.Key.ToLowerInvariant() (@typeGroup.Count())</summary>
+                                                            @foreach (var attachment in typeGroup)
+                                                            {
+                                                                <button type="button" class="srs-attachment-btn" @onclick="() => AnalyzeDevOpsAttachmentAsync(story, attachment)" disabled="@(!attachment.IsSupported)">
+                                                                    <span>@attachment.Name</span>
+                                                                    <span class="srs-attachment-meta">
+                                                                        @attachment.DisplaySize | @attachment.AttachedBy | @attachment.DisplayAttachedOn
+                                                                        @if (attachment.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || attachment.Name.EndsWith(".htm", StringComparison.OrdinalIgnoreCase))
+                                                                        {
+                                                                            <text> | open in browser</text>
+                                                                        }
+                                                                    </span>
+                                                                </button>
+                                                            }
+                                                        </details>
+                                                    }
+                                                    @if (story.Attachments.Any(a => !a.IsSupported))
+                                                    {
+                                                        <details class="srs-unsupported-wrap">
+                                                            <summary>unsupported files (@story.Attachments.Count(a => !a.IsSupported))</summary>
+                                                            @foreach (var typeGroup in story.Attachments
+                                                                .Where(a => !a.IsSupported)
+                                                                .OrderBy(a => a.Extension, StringComparer.OrdinalIgnoreCase)
+                                                                .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+                                                                .GroupBy(a => a.Extension, StringComparer.OrdinalIgnoreCase))
+                                                            {
+                                                                <details class="srs-filetype-group" open>
+                                                                    <summary>type: @typeGroup.Key.ToLowerInvariant() (@typeGroup.Count())</summary>
+                                                                    @foreach (var attachment in typeGroup)
+                                                                    {
+                                                                        <button type="button" class="srs-attachment-btn" disabled="true">
+                                                                            <span>@attachment.Name</span>
+                                                                            <span class="srs-attachment-meta">@attachment.DisplaySize | @attachment.AttachedBy | @attachment.DisplayAttachedOn | unsupported</span>
+                                                                        </button>
+                                                                    }
+                                                                </details>
+                                                            }
+                                                        </details>
+                                                    }
+                                                </div>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(UploadError))
+        {
+            <p class="srs-error">@UploadError</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(DevOpsError))
+        {
+            <p class="srs-error">@DevOpsError</p>
+        }
     </div>
 }
 else
@@ -73,6 +252,9 @@ else
                     </button>
                     <button type="button" class="@(SectionFilter == SectionFilterMode.Clean ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.Clean)">
                         Clean
+                    </button>
+                    <button type="button" class="@(SectionFilter == SectionFilterMode.ReviewRequired ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.ReviewRequired)">
+                        Review Required
                     </button>
                 </div>
                 <div class="srs-sections-list">
@@ -137,7 +319,7 @@ else
                                     <span>Original markdown</span>
                                 </div>
                                 <div class="srs-markdown">
-                                    @((MarkupString)RenderMarkdown(selectedSection.Content))
+                                    @((MarkupString)RenderMarkdown(selectedSection.Content, SectionSearchText))
                                 </div>
                             </section>
                         </section>
