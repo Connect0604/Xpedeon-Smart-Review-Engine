@@ -208,12 +208,6 @@
 else
 {
     var selectedSection = CurrentSection;
-    var selectedViolations = selectedSection is null
-        ? new List<Violation>()
-        : GetViolationsForSection(selectedSection.Id);
-    var selectedErrorCount = selectedViolations.Count(v => IsSeverity(v.Severity, "error"));
-    var selectedWarningCount = selectedViolations.Count(v => IsSeverity(v.Severity, "warning"));
-    var selectedInfoCount = selectedViolations.Count(v => IsSeverity(v.Severity, "info"));
     var filteredSections = FilteredSections.ToList();
 
     <div class="srs-app">
@@ -346,60 +340,7 @@ else
                             </section>
                         </section>
 
-                        <section class="srs-checklist-pane">
-                            <section class="srs-stage-card" aria-label="Checklist">
-                                <div class="srs-stage-title">Check list</div>
-                                <section class="srs-conclusion-card @(selectedViolations.Count == 0 ? "clean" : "needs-work")">
-                                    <div>
-                                        <div class="srs-conclusion-kicker">Conclusion</div>
-                                        <h3>@GetSectionConclusion(selectedViolations)</h3>
-                                        <p>@GetSectionAction(selectedViolations)</p>
-                                    </div>
-                                    <div class="srs-conclusion-stats">
-                                        <span>@selectedErrorCount errors</span>
-                                        <span>@selectedWarningCount warnings</span>
-                                        <span>@selectedInfoCount info</span>
-                                    </div>
-                                </section>
-                                @if (selectedViolations.Count > 0)
-                                {
-                                    <section class="srs-fix-list" aria-label="Fix checklist">
-                                        <div class="srs-section-label-row">
-                                            <span class="srs-panel-label">Fix checklist</span>
-                                            <span>@selectedViolations.Count item@(selectedViolations.Count == 1 ? string.Empty : "s")</span>
-                                        </div>
-                                        @for (var i = 0; i < selectedViolations.Count; i++)
-                                        {
-                                            var violation = selectedViolations[i];
-                                            var reasonKey = BuildReasonKey(selectedSection.Id, violation, i);
-                                            var reasonExpanded = ExpandedReasonKeys.Contains(reasonKey);
-                                            <article class="srs-fix-item @GetSeverityClass(violation.Severity)">
-                                                <div class="srs-fix-heading">
-                                                    <span class="srs-rule-id @GetSeverityClass(violation.Severity)">@violation.RuleId</span>
-                                                    <span>@violation.Title</span>
-                                                </div>
-                                                <div class="srs-fix-text">@violation.Fix</div>
-                                                <button type="button"
-                                                        class="srs-btn srs-btn-ghost srs-reason-toggle"
-                                                        @onclick="() => ToggleReason(reasonKey)">
-                                                    @(reasonExpanded ? "Hide evidence" : "Show evidence")
-                                                </button>
-                                                @if (reasonExpanded)
-                                                {
-                                                    <div class="srs-reason-box">
-                                                        <div class="srs-detail-label">Matched</div>
-                                                        <div class="srs-matched-text">@TruncateForDisplay(violation.Matched, 120)</div>
-                                                        <div class="srs-detail-label">Reason</div>
-                                                        <div>@violation.Reason</div>
-                                                    </div>
-                                                }
-                                            </article>
-                                        }
-                                    </section>
-                                }
-                            </section>
-                        </section>
-                    </div>
+                        </div>
                 }
             </main>
         </div>

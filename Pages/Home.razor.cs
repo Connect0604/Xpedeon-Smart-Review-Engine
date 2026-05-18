@@ -19,8 +19,6 @@ public partial class Home : ComponentBase
     [Inject]
     private IConfiguration Configuration { get; set; } = default!;
 
-    private readonly IReadOnlyList<string> SeverityOrder = new[] { "error", "warning", "info" };
-
     private enum SectionFilterMode
     {
         All,
@@ -47,7 +45,6 @@ public partial class Home : ComponentBase
     // SECTION 2: MARKDOWN PARSER (regex-based renderer)
     // ============================================================
     private readonly List<SectionModel> Sections = new();
-    private readonly HashSet<string> ExpandedReasonKeys = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, List<Violation>> ViolationsBySection = new(StringComparer.OrdinalIgnoreCase);
     private string? UploadedFileName;
     private string UploadError = string.Empty;
@@ -57,7 +54,6 @@ public partial class Home : ComponentBase
     private readonly List<ConfiguredSectionTab> ConfiguredSectionTabs = new();
     private string? ActiveCustomTabName;
     private bool IsDragging;
-    private bool IsViolationsPanelCollapsed;
     private bool ShowRevisionModal;
     private string RevisionPromptText = string.Empty;
     private string CopyButtonLabel = "Copy to Clipboard";
@@ -402,10 +398,8 @@ public partial class Home : ComponentBase
         SelectedSectionId = Sections.FirstOrDefault()?.Id;
         var activeProfiles = DetectActiveRuleProfiles(content, fileName);
         ViolationsBySection = RunAllRules(Sections, Rulebook, activeProfiles);
-        ExpandedReasonKeys.Clear();
         SectionSearchText = string.Empty;
         SectionFilter = SectionFilterMode.All;
-        IsViolationsPanelCollapsed = false;
         ShowRevisionModal = false;
         CopyButtonLabel = "Copy to Clipboard";
 
@@ -422,11 +416,9 @@ public partial class Home : ComponentBase
         SelectedSectionId = null;
         Sections.Clear();
         ViolationsBySection = new Dictionary<string, List<Violation>>(StringComparer.OrdinalIgnoreCase);
-        ExpandedReasonKeys.Clear();
         SectionSearchText = string.Empty;
         SectionFilter = SectionFilterMode.All;
         ActiveCustomTabName = null;
-        IsViolationsPanelCollapsed = false;
         ShowRevisionModal = false;
         RevisionPromptText = string.Empty;
         CopyButtonLabel = "Copy to Clipboard";
@@ -590,24 +582,6 @@ public partial class Home : ComponentBase
         }
     }
 
-    private void ToggleViolationsPanel()
-    {
-        IsViolationsPanelCollapsed = !IsViolationsPanelCollapsed;
-    }
-
-    private void ToggleReason(string key)
-    {
-        if (!ExpandedReasonKeys.Add(key))
-        {
-            ExpandedReasonKeys.Remove(key);
-        }
-    }
-
-    private string BuildReasonKey(string sectionId, Violation violation, int groupIndex)
-    {
-        return $"{sectionId}|{violation.RuleId}|{groupIndex}|{violation.Matched.GetHashCode()}";
-    }
-
     private List<Violation> GetViolationsForSection(string sectionId)
     {
         return ViolationsBySection.TryGetValue(sectionId, out var violations)
@@ -650,63 +624,6 @@ public partial class Home : ComponentBase
     private static bool IsSeverity(string value, string expected)
     {
         return value.Equals(expected, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string GetSeverityHeading(string severity)
-    {
-        return severity.ToLowerInvariant() switch
-        {
-            "error" => "Errors",
-            "warning" => "Warnings",
-            "info" => "Info",
-            _ => "Other"
-        };
-    }
-
-    private static string GetSeverityClass(string severity)
-    {
-        return severity.ToLowerInvariant() switch
-        {
-            "error" => "severity-error",
-            "warning" => "severity-warning",
-            "info" => "severity-info",
-            _ => "severity-info"
-        };
-    }
-
-    private static string GetSectionConclusion(IReadOnlyCollection<Violation> violations)
-    {
-        if (violations.Count == 0)
-        {
-            return "This section is clean.";
-        }
-
-        var errorCount = violations.Count(violation => IsSeverity(violation.Severity, "error"));
-        var warningCount = violations.Count(violation => IsSeverity(violation.Severity, "warning"));
-
-        if (errorCount > 0)
-        {
-            return $"{errorCount} blocking issue{(errorCount == 1 ? string.Empty : "s")} needs revision.";
-        }
-
-        if (warningCount > 0)
-        {
-            return $"{warningCount} warning{(warningCount == 1 ? string.Empty : "s")} should be checked.";
-        }
-
-        return $"{violations.Count} note{(violations.Count == 1 ? string.Empty : "s")} found.";
-    }
-
-    private static string GetSectionAction(IReadOnlyCollection<Violation> violations)
-    {
-        if (violations.Count == 0)
-        {
-            return "No action is required for this section. Move to the next section that has issues.";
-        }
-
-        var firstError = violations.FirstOrDefault(violation => IsSeverity(violation.Severity, "error"));
-        var primaryViolation = firstError ?? violations.First();
-        return $"Start with {primaryViolation.RuleId}: {primaryViolation.Fix}";
     }
 
     private void OpenRevisionPromptModal()
