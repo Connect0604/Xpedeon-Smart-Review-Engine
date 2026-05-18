@@ -1,9 +1,11 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
 using Microsoft.Extensions.Configuration;
+using SmartReviewSystem.Models.Ai;
 using SmartReviewSystem.Models.DevOps;
 using SmartReviewSystem.Models.Ui;
 using SmartReviewSystem.Services.DevOps;
@@ -47,8 +49,9 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private string? ActiveCustomTabName;
     private bool IsDragging;
     private bool IsRunningAiReview;
-    private string AiReviewResult = string.Empty;
-    private string AiReviewError = string.Empty;
+    private int CurrentRunningStepIndex = -1;
+    private IReadOnlyList<SectionPromptStep> CurrentSteps = Array.Empty<SectionPromptStep>();
+    private List<AiReviewStepState> AiReviewSteps = new();
     private CancellationTokenSource? _reviewCts;
     private UploadSource CurrentUploadSource = UploadSource.AzureDevOps;
     private string DevOpsOrganization = string.Empty;
@@ -410,8 +413,9 @@ public partial class Home : ComponentBase, IAsyncDisposable
         DevOpsUnsupportedExtensionSummary = string.Empty;
         DevOpsConnectionStatus = "Idle";
         DevOpsBuiltQuery = string.Empty;
-        AiReviewResult = string.Empty;
-        AiReviewError = string.Empty;
+        AiReviewSteps = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        CurrentRunningStepIndex = -1;
         IsRunningAiReview = false;
         CancelActiveReview();
     }
@@ -425,50 +429,89 @@ public partial class Home : ComponentBase, IAsyncDisposable
 
         CancelActiveReview();
         SelectedSectionId = sectionId;
-        AiReviewResult = string.Empty;
-        AiReviewError = string.Empty;
+        AiReviewSteps = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        CurrentRunningStepIndex = -1;
         IsRunningAiReview = false;
     }
 
     private async Task RunAiReviewAsync()
     {
         if (CurrentSection is null || IsRunningAiReview)
-        {
             return;
-        }
 
         CancelActiveReview();
         _reviewCts = new CancellationTokenSource();
         var ct = _reviewCts.Token;
 
+        var steps = OllamaService.GetPromptSteps(CurrentSection.Heading);
+        CurrentSteps = steps;
+        AiReviewSteps = steps.Select(_ => new AiReviewStepState()).ToList();
         IsRunningAiReview = true;
-        AiReviewResult = string.Empty;
-        AiReviewError = string.Empty;
 
         try
         {
-            await foreach (var token in OllamaService.StreamSectionSummaryAsync(
-                CurrentSection.Heading,
-                CurrentSection.Content,
-                ct))
+            for (var i = 0; i < steps.Count; i++)
             {
-                AiReviewResult += token;
+                CurrentRunningStepIndex = i;
+                StateHasChanged();
+
+                var step = steps[i];
+                var state = AiReviewSteps[i];
+                var hasSchema = step.OutputSchema?.Fields.Count > 0;
+
+                await foreach (var token in OllamaService.StreamStepAsync(
+                    CurrentSection.Heading, step, CurrentSection.Content, ct))
+                {
+                    state.RawResult += token;
+                    if (!hasSchema) StateHasChanged();
+                }
+
+                TryParseStepResult(state, step);
                 StateHasChanged();
             }
         }
-        catch (OperationCanceledException)
-        {
-            // section switched mid-stream — discard silently
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            AiReviewError = $"Review failed: {ex.Message}";
+            if (CurrentRunningStepIndex >= 0 && CurrentRunningStepIndex < AiReviewSteps.Count)
+                AiReviewSteps[CurrentRunningStepIndex].Error = $"Review failed: {ex.Message}";
         }
         finally
         {
             IsRunningAiReview = false;
+            CurrentRunningStepIndex = -1;
             StateHasChanged();
         }
+    }
+
+    private static void TryParseStepResult(AiReviewStepState state, SectionPromptStep step)
+    {
+        if (step.OutputSchema?.Fields.Count is null or 0 || string.IsNullOrWhiteSpace(state.RawResult))
+            return;
+
+        try
+        {
+            var start = state.RawResult.IndexOf('{');
+            var end = state.RawResult.LastIndexOf('}');
+            var json = start >= 0 && end > start ? state.RawResult[start..(end + 1)] : state.RawResult;
+
+            using var doc = JsonDocument.Parse(json);
+            state.Parsed = doc.RootElement
+                .EnumerateObject()
+                .ToDictionary(p => p.Name, p => p.Value.Clone());
+        }
+        catch
+        {
+            // leave Parsed null — UI falls back to raw result text
+        }
+    }
+
+    private sealed class AiReviewStepState
+    {
+        public string RawResult { get; set; } = string.Empty;
+        public string Error { get; set; } = string.Empty;
+        public Dictionary<string, JsonElement>? Parsed { get; set; }
     }
 
     private void CancelActiveReview()

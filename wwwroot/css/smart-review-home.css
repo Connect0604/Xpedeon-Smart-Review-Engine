@@ -656,10 +656,9 @@
     }
 
     .srs-focus-workspace {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
+        display: flex;
+        flex-direction: column;
         gap: 0.9rem;
-        align-items: start;
     }
 
     .srs-details-pane {
@@ -668,11 +667,17 @@
 
     .srs-ai-review-pane {
         min-width: 0;
-        position: sticky;
-        top: 0;
-        max-height: calc(100vh - 8rem);
-        overflow-y: auto;
-        padding-right: 0.15rem;
+    }
+
+    .srs-ai-review-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+    }
+
+    .srs-ai-review-header .srs-stage-title {
+        margin-bottom: 0;
     }
 
     .srs-ai-review-card {
@@ -680,6 +685,42 @@
         border: 1px solid var(--srs-border-tertiary);
         border-radius: 10px;
         overflow: hidden;
+    }
+
+    .srs-ai-step-card {
+        background: var(--srs-bg-primary);
+        border: 1px solid var(--srs-border-tertiary);
+        border-radius: 10px;
+        overflow: hidden;
+        margin-bottom: 0.6rem;
+    }
+
+    .srs-ai-step-card:last-child {
+        margin-bottom: 0;
+    }
+
+    .srs-ai-step-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.55rem 1rem;
+        border-bottom: 1px solid var(--srs-border-tertiary);
+        background: var(--srs-bg-secondary);
+    }
+
+    .srs-ai-step-label {
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        color: var(--srs-text-secondary);
+        text-transform: uppercase;
+    }
+
+    .srs-ai-step-thinking {
+        padding: 0.8rem 1rem;
+        font-size: 0.84rem;
+        color: var(--srs-text-tertiary);
+        font-style: italic;
     }
 
     .srs-ai-empty {
@@ -710,6 +751,15 @@
         color: var(--srs-text-tertiary);
     }
 
+    .srs-ai-empty--no-prompt {
+        opacity: 0.55;
+    }
+
+    .srs-ai-empty-icon--muted {
+        background: var(--srs-bg-tertiary);
+        color: var(--srs-text-tertiary);
+    }
+
     .srs-ai-status {
         display: flex;
         align-items: center;
@@ -728,6 +778,16 @@
         border-radius: 50%;
         animation: srs-spin 0.7s linear infinite;
         flex-shrink: 0;
+    }
+
+    .srs-ai-spinner--sm {
+        width: 13px;
+        height: 13px;
+        border-color: rgba(255,255,255,0.35);
+        border-top-color: #fff;
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: 0.3rem;
     }
 
     @keyframes srs-spin {
@@ -756,6 +816,75 @@
         line-height: 1.6;
         white-space: pre-wrap;
         word-break: break-word;
+    }
+
+    /* Structured output */
+    .srs-ai-structured {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+
+    .srs-ai-field {
+        padding: 0.7rem 1rem;
+        border-bottom: 1px solid var(--srs-border-tertiary);
+    }
+
+    .srs-ai-field:last-child {
+        border-bottom: none;
+    }
+
+    .srs-ai-field-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--srs-text-tertiary);
+        margin-bottom: 0.35rem;
+    }
+
+    .srs-ai-field-text {
+        font-size: 0.87rem;
+        color: var(--srs-text-primary);
+        line-height: 1.55;
+    }
+
+    .srs-ai-field-empty {
+        color: var(--srs-text-tertiary);
+    }
+
+    .srs-ai-field-list {
+        margin: 0;
+        padding-left: 1.1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .srs-ai-field-list li {
+        font-size: 0.87rem;
+        color: var(--srs-text-primary);
+        line-height: 1.5;
+    }
+
+    .srs-ai-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.78rem;
+        font-weight: 700;
+        padding: 0.2rem 0.65rem;
+        border-radius: 999px;
+    }
+
+    .srs-ai-badge--yes {
+        background: color-mix(in srgb, #16a34a 12%, transparent);
+        color: #15803d;
+    }
+
+    .srs-ai-badge--no {
+        background: color-mix(in srgb, #dc2626 12%, transparent);
+        color: #b91c1c;
     }
 
     .srs-ai-error {
@@ -841,7 +970,7 @@
         color: var(--srs-text-secondary);
         line-height: 1.62;
         font-size: 0.94rem;
-        max-width: 1120px;
+        width: 100%;
         padding: 0.95rem 1rem 1.1rem;
     }
 
@@ -1061,16 +1190,6 @@
             flex-direction: column;
         }
 
-        .srs-focus-workspace {
-            grid-template-columns: 1fr;
-        }
-
-        .srs-ai-review-pane {
-            position: static;
-            max-height: none;
-            overflow: visible;
-            padding-right: 0;
-        }
 
         .srs-sections-list {
             overflow-x: auto;

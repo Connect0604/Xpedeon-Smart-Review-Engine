@@ -217,6 +217,24 @@ else
                 <span class="srs-count-pill">@Sections.Count sections</span>
             </div>
             <div class="srs-topbar-actions">
+                @if (CurrentSection is not null && OllamaService.HasSectionPrompt(CurrentSection.Heading))
+                {
+                    @if (IsRunningAiReview)
+                    {
+                        <button type="button" class="srs-btn srs-btn-primary" disabled>
+                            <span class="srs-ai-spinner srs-ai-spinner--sm"></span>
+                            Running…
+                        </button>
+                    }
+                    else if (AiReviewSteps.Count > 0)
+                    {
+                        <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">Re-run AI Review</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">Run AI Review</button>
+                    }
+                }
                 <button type="button" class="srs-btn srs-btn-ghost" @onclick="ResetAll">Close</button>
             </div>
         </header>
@@ -295,6 +313,109 @@ else
                 else
                 {
                     <div class="srs-focus-workspace">
+                        <section class="srs-ai-review-pane">
+                            <div class="srs-stage-title">AI Review</div>
+
+                            @if (AiReviewSteps.Count > 0)
+                            {
+                                @for (var i = 0; i < CurrentSteps.Count; i++)
+                                {
+                                    var step = CurrentSteps[i];
+                                    var stepLabel = string.IsNullOrWhiteSpace(step.Label) ? $"Check {i + 1}" : step.Label;
+                                    var isRunningThis = IsRunningAiReview && i == CurrentRunningStepIndex;
+                                    var state = i < AiReviewSteps.Count ? AiReviewSteps[i] : null;
+
+                                    <div class="srs-ai-step-card">
+                                        <div class="srs-ai-step-header">
+                                            <span class="srs-ai-step-label">@stepLabel</span>
+                                            @if (isRunningThis)
+                                            {
+                                                <div class="srs-ai-spinner"></div>
+                                            }
+                                        </div>
+
+                                        @if (isRunningThis && string.IsNullOrWhiteSpace(state?.RawResult))
+                                        {
+                                            <div class="srs-ai-step-thinking">Analysing…</div>
+                                        }
+                                        else if (state is not null && !string.IsNullOrWhiteSpace(state.Error))
+                                        {
+                                            <div class="srs-ai-error">@state.Error</div>
+                                        }
+                                        else if (state?.Parsed is not null && step.OutputSchema is not null)
+                                        {
+                                            <div class="srs-ai-structured">
+                                                @foreach (var field in step.OutputSchema.Fields)
+                                                {
+                                                    <div class="srs-ai-field">
+                                                        <div class="srs-ai-field-label">@field.Label</div>
+                                                        @if (state.Parsed.TryGetValue(field.Key, out var val))
+                                                        {
+                                                            @if (field.Type == "boolean")
+                                                            {
+                                                                var isTrue = val.ValueKind == System.Text.Json.JsonValueKind.True ||
+                                                                             (val.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                                                              val.GetString()?.Equals("true", StringComparison.OrdinalIgnoreCase) == true);
+                                                                <span class="srs-ai-badge @(isTrue ? "srs-ai-badge--yes" : "srs-ai-badge--no")">
+                                                                    @(isTrue ? "Yes" : "No")
+                                                                </span>
+                                                            }
+                                                            else if (field.Type == "list")
+                                                            {
+                                                                <ul class="srs-ai-field-list">
+                                                                    @if (val.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                                                    {
+                                                                        foreach (var item in val.EnumerateArray())
+                                                                        {
+                                                                            <li>@item.GetString()</li>
+                                                                        }
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        <li>@val.ToString()</li>
+                                                                    }
+                                                                </ul>
+                                                            }
+                                                            else
+                                                            {
+                                                                <div class="srs-ai-field-text">@val.GetString()</div>
+                                                            }
+                                                        }
+                                                        else
+                                                        {
+                                                            <div class="srs-ai-field-text srs-ai-field-empty">—</div>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                        else if (state is not null && !string.IsNullOrWhiteSpace(state.RawResult))
+                                        {
+                                            <div class="srs-ai-result srs-markdown">@((MarkupString)RenderMarkdown(state.RawResult))</div>
+                                        }
+                                    </div>
+                                }
+                            }
+                            else if (CurrentSection is not null && OllamaService.HasSectionPrompt(CurrentSection.Heading))
+                            {
+                                <div class="srs-ai-review-card">
+                                    <div class="srs-ai-empty">
+                                        <div class="srs-ai-empty-icon">AI</div>
+                                        <p>Click <strong>Run AI Review</strong> above to start.</p>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="srs-ai-review-card">
+                                    <div class="srs-ai-empty srs-ai-empty--no-prompt">
+                                        <div class="srs-ai-empty-icon srs-ai-empty-icon--muted">AI</div>
+                                        <p>No AI prompt configured for this section.</p>
+                                    </div>
+                                </div>
+                            }
+                        </section>
+
                         <section class="srs-details-pane">
                             <section class="srs-stage-card" aria-label="Section details">
                                 <div class="srs-stage-title">Section details</div>
@@ -318,45 +439,6 @@ else
                                     @((MarkupString)RenderMarkdown(selectedSection.Content, ActiveHighlightTerms))
                                 </div>
                             </section>
-                        </section>
-
-                        <section class="srs-ai-review-pane">
-                            <div class="srs-stage-title">AI Review</div>
-                            <div class="srs-ai-review-card">
-                                @if (IsRunningAiReview)
-                                {
-                                    <div class="srs-ai-status">
-                                        <div class="srs-ai-spinner"></div>
-                                        <span>Running review…</span>
-                                    </div>
-                                }
-                                else if (!string.IsNullOrWhiteSpace(AiReviewError))
-                                {
-                                    <div class="srs-ai-result-header">
-                                        <span class="srs-panel-label">Error</span>
-                                        <button type="button" class="srs-btn srs-btn-ghost srs-ai-rerun-btn" @onclick="RunAiReviewAsync">Retry</button>
-                                    </div>
-                                    <div class="srs-ai-error">@AiReviewError</div>
-                                }
-                                else if (!string.IsNullOrWhiteSpace(AiReviewResult))
-                                {
-                                    <div class="srs-ai-result-header">
-                                        <span class="srs-panel-label">Summary</span>
-                                        <button type="button" class="srs-btn srs-btn-ghost srs-ai-rerun-btn" @onclick="RunAiReviewAsync">Re-run</button>
-                                    </div>
-                                    <div class="srs-ai-result srs-markdown">@((MarkupString)RenderMarkdown(AiReviewResult))</div>
-                                }
-                                else
-                                {
-                                    <div class="srs-ai-empty">
-                                        <div class="srs-ai-empty-icon">AI</div>
-                                        <p>No review yet for this section.</p>
-                                        <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">
-                                            Run AI Review
-                                        </button>
-                                    </div>
-                                }
-                            </div>
                         </section>
 
                         </div>
