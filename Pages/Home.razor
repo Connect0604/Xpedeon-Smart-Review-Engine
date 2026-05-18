@@ -320,6 +320,45 @@ else
                             </section>
                         </section>
 
+                        <section class="srs-ai-review-pane">
+                            <div class="srs-stage-title">AI Review</div>
+                            <div class="srs-ai-review-card">
+                                @if (IsRunningAiReview)
+                                {
+                                    <div class="srs-ai-status">
+                                        <div class="srs-ai-spinner"></div>
+                                        <span>Running review…</span>
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(AiReviewError))
+                                {
+                                    <div class="srs-ai-result-header">
+                                        <span class="srs-panel-label">Error</span>
+                                        <button type="button" class="srs-btn srs-btn-ghost srs-ai-rerun-btn" @onclick="RunAiReviewAsync">Retry</button>
+                                    </div>
+                                    <div class="srs-ai-error">@AiReviewError</div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(AiReviewResult))
+                                {
+                                    <div class="srs-ai-result-header">
+                                        <span class="srs-panel-label">Summary</span>
+                                        <button type="button" class="srs-btn srs-btn-ghost srs-ai-rerun-btn" @onclick="RunAiReviewAsync">Re-run</button>
+                                    </div>
+                                    <div class="srs-ai-result srs-markdown">@((MarkupString)RenderMarkdown(AiReviewResult))</div>
+                                }
+                                else
+                                {
+                                    <div class="srs-ai-empty">
+                                        <div class="srs-ai-empty-icon">AI</div>
+                                        <p>No review yet for this section.</p>
+                                        <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">
+                                            Run AI Review
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        </section>
+
                         </div>
                 }
             </main>

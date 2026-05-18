@@ -7,15 +7,18 @@ using Microsoft.Extensions.Configuration;
 using SmartReviewSystem.Models.DevOps;
 using SmartReviewSystem.Models.Ui;
 using SmartReviewSystem.Services.DevOps;
+using SmartReviewSystem.Services.Ollama;
 
 namespace SmartReviewSystem.Pages;
 
-public partial class Home : ComponentBase
+public partial class Home : ComponentBase, IAsyncDisposable
 {
     [Inject]
     private IJSRuntime JS { get; set; } = default!;
     [Inject]
     private IAzureDevOpsService AzureDevOpsService { get; set; } = default!;
+    [Inject]
+    private IOllamaService OllamaService { get; set; } = default!;
     [Inject]
     private IConfiguration Configuration { get; set; } = default!;
 
@@ -43,6 +46,10 @@ public partial class Home : ComponentBase
     private readonly List<ConfiguredSectionTab> ConfiguredSectionTabs = new();
     private string? ActiveCustomTabName;
     private bool IsDragging;
+    private bool IsRunningAiReview;
+    private string AiReviewResult = string.Empty;
+    private string AiReviewError = string.Empty;
+    private CancellationTokenSource? _reviewCts;
     private UploadSource CurrentUploadSource = UploadSource.AzureDevOps;
     private string DevOpsOrganization = string.Empty;
     private string DevOpsProject = string.Empty;
@@ -403,11 +410,78 @@ public partial class Home : ComponentBase
         DevOpsUnsupportedExtensionSummary = string.Empty;
         DevOpsConnectionStatus = "Idle";
         DevOpsBuiltQuery = string.Empty;
+        AiReviewResult = string.Empty;
+        AiReviewError = string.Empty;
+        IsRunningAiReview = false;
+        CancelActiveReview();
     }
 
     private void SelectSection(string sectionId)
     {
+        if (SelectedSectionId == sectionId)
+        {
+            return;
+        }
+
+        CancelActiveReview();
         SelectedSectionId = sectionId;
+        AiReviewResult = string.Empty;
+        AiReviewError = string.Empty;
+        IsRunningAiReview = false;
+    }
+
+    private async Task RunAiReviewAsync()
+    {
+        if (CurrentSection is null || IsRunningAiReview)
+        {
+            return;
+        }
+
+        CancelActiveReview();
+        _reviewCts = new CancellationTokenSource();
+        var ct = _reviewCts.Token;
+
+        IsRunningAiReview = true;
+        AiReviewResult = string.Empty;
+        AiReviewError = string.Empty;
+
+        try
+        {
+            await foreach (var token in OllamaService.StreamSectionSummaryAsync(
+                CurrentSection.Heading,
+                CurrentSection.Content,
+                ct))
+            {
+                AiReviewResult += token;
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // section switched mid-stream — discard silently
+        }
+        catch (Exception ex)
+        {
+            AiReviewError = $"Review failed: {ex.Message}";
+        }
+        finally
+        {
+            IsRunningAiReview = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelActiveReview()
+    {
+        _reviewCts?.Cancel();
+        _reviewCts?.Dispose();
+        _reviewCts = null;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        CancelActiveReview();
+        return ValueTask.CompletedTask;
     }
 
     private void SetSectionFilter(SectionFilterMode filter)
