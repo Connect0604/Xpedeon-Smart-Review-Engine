@@ -215,12 +215,8 @@ else
             <div class="srs-topbar-left">
                 <span class="srs-file-pill">@UploadedFileName</span>
                 <span class="srs-count-pill">@Sections.Count sections</span>
-                <span class="srs-count-pill danger">@TotalIssueCount issues</span>
             </div>
             <div class="srs-topbar-actions">
-                <button type="button" class="srs-btn srs-btn-primary" @onclick="OpenRevisionPromptModal" disabled="@(TotalIssueCount == 0)">
-                    Generate Revision Prompt
-                </button>
                 <button type="button" class="srs-btn srs-btn-ghost" @onclick="ResetAll">Close</button>
             </div>
         </header>
@@ -230,7 +226,7 @@ else
                 <div class="srs-sidebar-head">
                     <div>
                         <div class="srs-panel-label">Sections</div>
-                        <div class="srs-sidebar-summary">@CleanSectionCount clean / @Sections.Count total</div>
+                        <div class="srs-sidebar-summary">@Sections.Count total</div>
                     </div>
                 </div>
                 <div class="srs-search-wrap">
@@ -251,12 +247,6 @@ else
                 <div class="srs-filter-tabs" role="group" aria-label="Section filters">
                     <button type="button" class="@(SectionFilter == SectionFilterMode.All ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.All)">
                         All
-                    </button>
-                    <button type="button" class="@(SectionFilter == SectionFilterMode.Issues ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.Issues)">
-                        Issues
-                    </button>
-                    <button type="button" class="@(SectionFilter == SectionFilterMode.Clean ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.Clean)">
-                        Clean
                     </button>
                     @if (ShouldShowDefaultReviewRequiredTab)
                     {
@@ -282,7 +272,6 @@ else
                     {
                         @foreach (var sectionItem in filteredSections)
                         {
-                            var status = GetSectionStatus(sectionItem.Id);
                             var isActive = sectionItem.Id == SelectedSectionId;
                             <button type="button"
                                     class="srs-section-row @(isActive ? "active" : string.Empty)"
@@ -292,7 +281,6 @@ else
                                     <span class="srs-section-title">@sectionItem.Heading</span>
                                     <span class="srs-line-meta">Line @(sectionItem.LineStart)</span>
                                 </span>
-                                <span class="srs-violation-pill @status.CssClass">@status.BadgeText</span>
                             </button>
                         }
                     }
@@ -318,14 +306,6 @@ else
                                             <div class="srs-center-meta">Line @(selectedSection.LineStart) - @(selectedSection.LineCount) lines</div>
                                         </div>
                                     </div>
-                                    <div class="srs-section-nav">
-                                        <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => SelectAdjacentIssue(-1)" disabled="@(!HasAdjacentIssue(-1))">
-                                            Previous issue
-                                        </button>
-                                        <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => SelectAdjacentIssue(1)" disabled="@(!HasAdjacentIssue(1))">
-                                            Next issue
-                                        </button>
-                                    </div>
                                 </div>
                             </section>
 
@@ -343,25 +323,6 @@ else
                         </div>
                 }
             </main>
-        </div>
-    </div>
-}
-
-@if (ShowRevisionModal)
-{
-    <div class="srs-modal-overlay" @onclick="CloseRevisionPromptModal">
-        <div class="srs-modal-card" @onclick:stopPropagation="true">
-            <div class="srs-modal-header">
-                <h3>Revision Prompt</h3>
-                <button type="button" class="srs-btn srs-btn-ghost" @onclick="CloseRevisionPromptModal">Close</button>
-            </div>
-            <div class="srs-modal-body">
-                <pre>@RevisionPromptText</pre>
-            </div>
-            <div class="srs-modal-footer">
-                <button type="button" class="srs-btn srs-btn-primary" @onclick="CopyRevisionPromptAsync">@CopyButtonLabel</button>
-                <button type="button" class="srs-btn srs-btn-ghost" @onclick="CloseRevisionPromptModal">Close</button>
-            </div>
         </div>
     </div>
 }

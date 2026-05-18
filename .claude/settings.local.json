@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Get-ChildItem -Path \"D:\\\\WORK\\\\AI Projects\\\\XpedeonSmartReview\\\\SmartReviewSystem\" -Recurse -Directory | Where-Object { $_.Name -notin @\\('bin', 'obj', 'artifacts', 'publish', '.claude', '.git'\\) } | ForEach-Object { $_.FullName.Replace\\(\"D:\\\\WORK\\\\AI Projects\\\\XpedeonSmartReview\\\\SmartReviewSystem\", ''\\) } | Sort-Object)"
+      "PowerShell(Get-ChildItem -Path \"D:\\\\WORK\\\\AI Projects\\\\XpedeonSmartReview\\\\SmartReviewSystem\" -Recurse -Directory | Where-Object { $_.Name -notin @\\('bin', 'obj', 'artifacts', 'publish', '.claude', '.git'\\) } | ForEach-Object { $_.FullName.Replace\\(\"D:\\\\WORK\\\\AI Projects\\\\XpedeonSmartReview\\\\SmartReviewSystem\", ''\\) } | Sort-Object)",
+      "Bash(grep -n \"return rules\\\\|};$\" \"D:\\\\WORK\\\\AI Projects\\\\XpedeonSmartReview\\\\SmartReviewSystem\\\\Pages\\\\Home.razor.cs\")"
     ]
   }
 }

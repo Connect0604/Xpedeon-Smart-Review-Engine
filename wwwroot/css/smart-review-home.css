@@ -445,12 +445,6 @@
         line-height: 1;
     }
 
-    .srs-count-pill.danger {
-        background: #fff1f2;
-        border-color: #fecdd3;
-        color: #be123c;
-    }
-
     .srs-topbar-actions {
         display: flex;
         align-items: center;
@@ -590,7 +584,7 @@
         border-radius: 7px;
         background: transparent;
         display: grid;
-        grid-template-columns: 22px minmax(0, 1fr) auto;
+        grid-template-columns: 22px minmax(0, 1fr);
         align-items: center;
         gap: 0.42rem;
         padding: 0.42rem 0.48rem;
@@ -652,34 +646,6 @@
         font-family: var(--srs-mono);
         font-size: 0.72rem;
         color: var(--srs-text-tertiary);
-    }
-
-    .srs-violation-pill {
-        font-family: var(--srs-mono);
-        font-size: 0.7rem;
-        border-radius: 999px;
-        padding: 0.12rem 0.42rem;
-        border: 1px solid transparent;
-        min-width: 2.3rem;
-        text-align: center;
-    }
-
-    .srs-badge-error {
-        background: #fee2e2;
-        color: #b91c1c;
-        border-color: #fecaca;
-    }
-
-    .srs-badge-warning {
-        background: #fef3c7;
-        color: #92400e;
-        border-color: #fcd34d;
-    }
-
-    .srs-badge-clean {
-        background: color-mix(in srgb, var(--srs-bg-success) 75%, white 25%);
-        color: #166534;
-        border-color: #86efac;
     }
 
     .srs-focus-panel {
@@ -748,12 +714,6 @@
         color: var(--srs-text-tertiary);
         font-family: var(--srs-mono);
         font-size: 0.79rem;
-    }
-
-    .srs-section-nav {
-        display: flex;
-        gap: 0.45rem;
-        align-items: center;
     }
 
     .srs-document-card {
@@ -961,70 +921,6 @@
         color: white;
     }
 
-    .srs-modal-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(15, 23, 42, 0.38);
-        backdrop-filter: blur(4px);
-        z-index: 100;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 1rem;
-    }
-
-    .srs-modal-card {
-        width: min(720px, 100%);
-        max-height: 80vh;
-        background: var(--srs-bg-primary);
-        border-radius: var(--srs-radius-lg);
-        border: 1px solid var(--srs-border-tertiary);
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.26);
-    }
-
-    .srs-modal-header {
-        border-bottom: 1px solid var(--srs-border-tertiary);
-        padding: 0.8rem 0.95rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 1rem;
-    }
-
-    .srs-modal-header h3 {
-        margin: 0;
-        font-size: 1.02rem;
-    }
-
-    .srs-modal-body {
-        overflow: auto;
-        padding: 0.95rem;
-        background: color-mix(in srgb, var(--srs-bg-secondary) 68%, white 32%);
-    }
-
-    .srs-modal-body pre {
-        margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-family: "Segoe UI", "Noto Sans", Arial, sans-serif;
-        color: var(--srs-text-secondary);
-        line-height: 1.5;
-    }
-
-    .srs-modal-footer {
-        position: sticky;
-        bottom: 0;
-        border-top: 1px solid var(--srs-border-tertiary);
-        background: var(--srs-bg-primary);
-        padding: 0.75rem 0.95rem;
-        display: flex;
-        gap: 0.6rem;
-        justify-content: flex-end;
-    }
-
     @media (max-width: 1180px) {
         .srs-review-shell {
             grid-template-columns: 280px minmax(0, 1fr);
@@ -1096,8 +992,4 @@
             flex: 1;
         }
 
-        .srs-conclusion-stats {
-            justify-content: flex-start;
-            min-width: 0;
-        }
     }
