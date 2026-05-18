@@ -13,4 +13,16 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="9.0.15" PrivateAssets="all" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Exclude generated/nested project artifacts from this client project build -->
+    <Compile Remove="SmartReviewSystem.Api\**\*.cs" />
+    <Compile Remove="artifacts\**\*.cs" />
+    <EmbeddedResource Remove="SmartReviewSystem.Api\**\*" />
+    <EmbeddedResource Remove="artifacts\**\*" />
+    <None Remove="SmartReviewSystem.Api\**\*" />
+    <None Remove="artifacts\**\*" />
+    <Content Remove="SmartReviewSystem.Api\**\*" />
+    <Content Remove="artifacts\**\*" />
+  </ItemGroup>
+
 </Project>
