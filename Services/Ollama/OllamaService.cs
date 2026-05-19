@@ -32,16 +32,28 @@ public sealed class OllamaService : IOllamaService
 
     public bool HasSectionPrompt(string heading) =>
         _commonPrompts.Count > 0 ||
-        _sectionPrompts.Any(s => s.Name.Equals(heading, StringComparison.OrdinalIgnoreCase)
-                               && s.Prompts.Count > 0);
+        _sectionPrompts.Any(s => SectionNameMatches(s.Name, heading) && s.Prompts.Count > 0);
 
     public IReadOnlyList<SectionPromptStep> GetPromptSteps(string heading)
     {
         var sectionSteps = _sectionPrompts
-            .FirstOrDefault(s => s.Name.Equals(heading, StringComparison.OrdinalIgnoreCase))
+            .FirstOrDefault(s => SectionNameMatches(s.Name, heading))
             ?.Prompts ?? new List<SectionPromptStep>();
 
         return _commonPrompts.Concat(sectionSteps).ToList();
+    }
+
+    // Matches "Razor Page" against "16. Razor Page", "A. Razor Page", or an exact heading.
+    private static bool SectionNameMatches(string configName, string heading) =>
+        heading.Contains(configName, StringComparison.OrdinalIgnoreCase);
+
+    public IReadOnlyList<SectionPromptStep> GetAllAvailableSteps()
+    {
+        var sectionSteps = _sectionPrompts.SelectMany(s => s.Prompts);
+        return _commonPrompts.Concat(sectionSteps)
+            .GroupBy(s => s.Label, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
     }
 
     public async IAsyncEnumerable<string> StreamStepAsync(
@@ -123,6 +135,7 @@ public sealed class OllamaService : IOllamaService
             {
                 "list"    => "[\"<value>\"]",
                 "boolean" => "true",
+                "table"   => "[{\"label\":\"<display name or ->\",\"component\":\"<control type>\",\"binding\":\"<bound variable or ->\"}]",
                 _         => "\"<value>\""
             };
             sb.AppendLine($"  \"{field.Key}\": {example}{comma}");

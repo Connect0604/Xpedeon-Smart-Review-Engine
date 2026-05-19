@@ -5,11 +5,13 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
 using Microsoft.Extensions.Configuration;
+using SmartReviewSystem.Models.Agents;
 using SmartReviewSystem.Models.Ai;
 using SmartReviewSystem.Models.DevOps;
 using SmartReviewSystem.Models.Ui;
 using SmartReviewSystem.Services.DevOps;
 using SmartReviewSystem.Services.Ollama;
+using SmartReviewSystem.Services.Orchestration;
 
 namespace SmartReviewSystem.Pages;
 
@@ -23,6 +25,12 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private IOllamaService OllamaService { get; set; } = default!;
     [Inject]
     private IConfiguration Configuration { get; set; } = default!;
+    [Inject]
+    private ConfigRoutingStrategy ConfigStrategy { get; set; } = default!;
+    [Inject]
+    private LlmRoutingStrategy LlmStrategy { get; set; } = default!;
+    [Inject]
+    private ReviewOrchestrator Orchestrator { get; set; } = default!;
 
     private enum SectionFilterMode
     {
@@ -41,6 +49,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
 
     private readonly List<SectionModel> Sections = new();
     private string? UploadedFileName;
+    private DevOpsStoryItem? ActiveStory;
     private string UploadError = string.Empty;
     private string? SelectedSectionId;
     private string SectionSearchText = string.Empty;
@@ -49,10 +58,16 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private string? ActiveCustomTabName;
     private bool IsDragging;
     private bool IsRunningAiReview;
-    private int CurrentRunningStepIndex = -1;
+    private bool IsFullScanEnabled;
+    private bool IsFullScanRunning;
+    private string? FullScanActiveSectionId;
+    private int FullScanProgress;
+    private int FullScanTotal;
+    private RoutingMode ActiveRoutingMode;
     private IReadOnlyList<SectionPromptStep> CurrentSteps = Array.Empty<SectionPromptStep>();
-    private List<AiReviewStepState> AiReviewSteps = new();
+    private List<SpokeResult> SpokeResults = new();
     private CancellationTokenSource? _reviewCts;
+    private readonly Dictionary<string, (List<SpokeResult> Results, IReadOnlyList<SectionPromptStep> Steps)> _reviewCache = new();
     private UploadSource CurrentUploadSource = UploadSource.AzureDevOps;
     private string DevOpsOrganization = string.Empty;
     private string DevOpsProject = string.Empty;
@@ -78,6 +93,13 @@ public partial class Home : ComponentBase, IAsyncDisposable
 
     protected override void OnInitialized()
     {
+        var routingModeValue = Configuration["Validation:Controls:RoutingMode"] ?? "Static";
+        ActiveRoutingMode = Enum.TryParse<RoutingMode>(routingModeValue, ignoreCase: true, out var parsed)
+            ? parsed
+            : RoutingMode.Static;
+
+        IsFullScanEnabled = Configuration.GetValue<bool>("Validation:Controls:FullScan", false);
+
         var options = Configuration.GetSection("DevOps").Get<DevOpsOptions>() ?? new DevOpsOptions();
         DevOpsOrganization = options.Organization;
         DevOpsProject = options.Project;
@@ -123,6 +145,15 @@ public partial class Home : ComponentBase, IAsyncDisposable
             ? "Azure DevOps source"
             : "Local upload source";
     private SectionModel? CurrentSection => Sections.FirstOrDefault(s => s.Id == SelectedSectionId);
+
+    private IRoutingStrategy ActiveStrategy =>
+        ActiveRoutingMode == RoutingMode.Static ? ConfigStrategy : LlmStrategy;
+
+    private bool CurrentSectionHasAiSupport =>
+        CurrentSection is not null && (
+            ActiveRoutingMode == RoutingMode.Dynamic ||
+            OllamaService.HasSectionPrompt(CurrentSection.Heading)
+        );
 
     private IEnumerable<SectionModel> FilteredSections
     {
@@ -223,6 +254,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
             using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
             using var reader = new StreamReader(stream);
             var content = await reader.ReadToEndAsync();
+            ActiveStory = null;
             ProcessUploadedContent(file.Name, content);
         }
         catch (Exception ex)
@@ -328,6 +360,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
 
             var content = await AzureDevOpsService.DownloadAttachmentTextAsync(attachment.Url, DevOpsPatToken.Trim(), CancellationToken.None);
             var fileName = $"US-{story.Id}-{attachment.Name}";
+            ActiveStory = story;
             ProcessUploadedContent(fileName, content);
         }
         catch (Exception ex)
@@ -399,6 +432,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private void ResetAll()
     {
         UploadedFileName = null;
+        ActiveStory = null;
         UploadError = string.Empty;
         SelectedSectionId = null;
         Sections.Clear();
@@ -413,105 +447,160 @@ public partial class Home : ComponentBase, IAsyncDisposable
         DevOpsUnsupportedExtensionSummary = string.Empty;
         DevOpsConnectionStatus = "Idle";
         DevOpsBuiltQuery = string.Empty;
-        AiReviewSteps = new();
+        SpokeResults = new();
         CurrentSteps = Array.Empty<SectionPromptStep>();
-        CurrentRunningStepIndex = -1;
         IsRunningAiReview = false;
+        IsFullScanRunning = false;
+        FullScanActiveSectionId = null;
+        FullScanProgress = 0;
+        FullScanTotal = 0;
+        _reviewCache.Clear();
         CancelActiveReview();
     }
 
     private void SelectSection(string sectionId)
     {
-        if (SelectedSectionId == sectionId)
-        {
+        if (SelectedSectionId == sectionId && !IsFullScanRunning)
             return;
-        }
 
         CancelActiveReview();
+
+        if (IsFullScanRunning)
+        {
+            IsFullScanRunning = false;
+            FullScanActiveSectionId = null;
+        }
+
         SelectedSectionId = sectionId;
-        AiReviewSteps = new();
-        CurrentSteps = Array.Empty<SectionPromptStep>();
-        CurrentRunningStepIndex = -1;
         IsRunningAiReview = false;
+
+        if (_reviewCache.TryGetValue(sectionId, out var cached))
+        {
+            SpokeResults = cached.Results;
+            CurrentSteps = cached.Steps;
+        }
+        else
+        {
+            SpokeResults = new();
+            CurrentSteps = Array.Empty<SectionPromptStep>();
+        }
     }
 
     private async Task RunAiReviewAsync()
     {
-        if (CurrentSection is null || IsRunningAiReview)
+        if (CurrentSection is null || IsRunningAiReview || IsFullScanRunning)
             return;
 
         CancelActiveReview();
         _reviewCts = new CancellationTokenSource();
         var ct = _reviewCts.Token;
 
-        var steps = OllamaService.GetPromptSteps(CurrentSection.Heading);
-        CurrentSteps = steps;
-        AiReviewSteps = steps.Select(_ => new AiReviewStepState()).ToList();
-        IsRunningAiReview = true;
+        SpokeResults = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        StateHasChanged();
 
         try
         {
-            for (var i = 0; i < steps.Count; i++)
-            {
-                CurrentRunningStepIndex = i;
-                StateHasChanged();
-
-                var step = steps[i];
-                var state = AiReviewSteps[i];
-                var hasSchema = step.OutputSchema?.Fields.Count > 0;
-
-                await foreach (var token in OllamaService.StreamStepAsync(
-                    CurrentSection.Heading, step, CurrentSection.Content, ct))
-                {
-                    state.RawResult += token;
-                    if (!hasSchema) StateHasChanged();
-                }
-
-                TryParseStepResult(state, step);
-                StateHasChanged();
-            }
+            await RunAiReviewCoreAsync(CurrentSection, ct);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (CurrentRunningStepIndex >= 0 && CurrentRunningStepIndex < AiReviewSteps.Count)
-                AiReviewSteps[CurrentRunningStepIndex].Error = $"Review failed: {ex.Message}";
-        }
         finally
         {
-            IsRunningAiReview = false;
-            CurrentRunningStepIndex = -1;
             StateHasChanged();
         }
     }
 
-    private static void TryParseStepResult(AiReviewStepState state, SectionPromptStep step)
+    private async Task RunFullScanAsync()
     {
-        if (step.OutputSchema?.Fields.Count is null or 0 || string.IsNullOrWhiteSpace(state.RawResult))
+        if (IsFullScanRunning || IsRunningAiReview || Sections.Count == 0)
             return;
+
+        CancelActiveReview();
+        _reviewCts = new CancellationTokenSource();
+        var ct = _reviewCts.Token;
+
+        IsFullScanRunning = true;
+        FullScanProgress = 0;
+        FullScanTotal = Sections.Count;
+        StateHasChanged();
 
         try
         {
-            var start = state.RawResult.IndexOf('{');
-            var end = state.RawResult.LastIndexOf('}');
-            var json = start >= 0 && end > start ? state.RawResult[start..(end + 1)] : state.RawResult;
+            foreach (var section in Sections)
+            {
+                ct.ThrowIfCancellationRequested();
 
-            using var doc = JsonDocument.Parse(json);
-            state.Parsed = doc.RootElement
-                .EnumerateObject()
-                .ToDictionary(p => p.Name, p => p.Value.Clone());
+                FullScanActiveSectionId = section.Id;
+                SelectedSectionId = section.Id;
+                SpokeResults = _reviewCache.TryGetValue(section.Id, out var cached)
+                    ? cached.Results
+                    : new List<SpokeResult>();
+                CurrentSteps = _reviewCache.TryGetValue(section.Id, out var cachedSteps)
+                    ? cachedSteps.Steps
+                    : Array.Empty<SectionPromptStep>();
+                StateHasChanged();
+
+                await RunAiReviewCoreAsync(section, ct);
+
+                FullScanProgress++;
+                StateHasChanged();
+            }
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        finally
         {
-            // leave Parsed null — UI falls back to raw result text
+            IsFullScanRunning = false;
+            FullScanActiveSectionId = null;
+            IsRunningAiReview = false;
+            StateHasChanged();
         }
     }
 
-    private sealed class AiReviewStepState
+    private async Task RunAiReviewCoreAsync(SectionModel section, CancellationToken ct)
     {
-        public string RawResult { get; set; } = string.Empty;
-        public string Error { get; set; } = string.Empty;
-        public Dictionary<string, JsonElement>? Parsed { get; set; }
+        IsRunningAiReview = true;
+        SpokeResults = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        StateHasChanged();
+
+        try
+        {
+            var steps = await ActiveStrategy.ResolveStepsAsync(section.Heading, section.Content, ct);
+
+            CurrentSteps = steps;
+            SpokeResults = steps.Select(s => new SpokeResult { Label = s.Label }).ToList();
+            StateHasChanged();
+
+            await Orchestrator.RunAsync(
+                section.Heading,
+                section.Content,
+                steps,
+                SpokeResults,
+                StateHasChanged,
+                ct);
+
+            _reviewCache[section.Id] = (SpokeResults, CurrentSteps);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            SpokeResults = new List<SpokeResult>
+            {
+                new SpokeResult
+                {
+                    Label = "Error",
+                    Status = SpokeStatus.Failed,
+                    Error = $"Review failed: {ex.Message}"
+                }
+            };
+        }
+        finally
+        {
+            IsRunningAiReview = false;
+        }
     }
 
     private void CancelActiveReview()
@@ -1004,6 +1093,9 @@ public partial class Home : ComponentBase, IAsyncDisposable
         sb.AppendLine(codeBlocks[index]);
         return true;
     }
+
+    private static MarkupString FormatInlineMarkup(string? text) =>
+        new MarkupString(FormatInline(text ?? string.Empty));
 
     private static string FormatInline(string input)
     {

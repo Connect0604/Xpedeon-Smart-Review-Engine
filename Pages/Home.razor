@@ -213,26 +213,50 @@ else
     <div class="srs-app">
         <header class="srs-topbar">
             <div class="srs-topbar-left">
+                @if (ActiveStory is not null)
+                {
+                    <span class="srs-story-id-pill">#@ActiveStory.Id</span>
+                    <span class="srs-story-type-pill">@ActiveStory.WorkItemType</span>
+                    <span class="srs-story-title">@ActiveStory.Title</span>
+                    <span class="srs-topbar-divider"></span>
+                }
                 <span class="srs-file-pill">@UploadedFileName</span>
                 <span class="srs-count-pill">@Sections.Count sections</span>
             </div>
             <div class="srs-topbar-actions">
-                @if (CurrentSection is not null && OllamaService.HasSectionPrompt(CurrentSection.Heading))
+                @if (IsFullScanRunning)
                 {
-                    @if (IsRunningAiReview)
+                    <span class="srs-fullscan-progress">
+                        <span class="srs-ai-spinner srs-ai-spinner--sm"></span>
+                        Scanning @FullScanProgress / @FullScanTotal…
+                    </span>
+                    <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => { CancelActiveReview(); IsFullScanRunning = false; FullScanActiveSectionId = null; }">Cancel scan</button>
+                }
+                else
+                {
+                    @if (IsFullScanEnabled)
                     {
-                        <button type="button" class="srs-btn srs-btn-primary" disabled>
-                            <span class="srs-ai-spinner srs-ai-spinner--sm"></span>
-                            Running…
+                        <button type="button" class="srs-btn srs-btn-scan" @onclick="RunFullScanAsync" disabled="@IsRunningAiReview">
+                            @(_reviewCache.Count > 0 ? "Re-scan All" : "Scan All Sections")
                         </button>
                     }
-                    else if (AiReviewSteps.Count > 0)
+                    @if (CurrentSectionHasAiSupport)
                     {
-                        <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">Re-run AI Review</button>
-                    }
-                    else
-                    {
-                        <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">Run AI Review</button>
+                        @if (IsRunningAiReview)
+                        {
+                            <button type="button" class="srs-btn srs-btn-primary" disabled>
+                                <span class="srs-ai-spinner srs-ai-spinner--sm"></span>
+                                Running…
+                            </button>
+                        }
+                        else if (SpokeResults.Count > 0)
+                        {
+                            <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">Re-run AI Review</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">Run AI Review</button>
+                        }
                     }
                 }
                 <button type="button" class="srs-btn srs-btn-ghost" @onclick="ResetAll">Close</button>
@@ -291,14 +315,25 @@ else
                         @foreach (var sectionItem in filteredSections)
                         {
                             var isActive = sectionItem.Id == SelectedSectionId;
+                            var isScanning = sectionItem.Id == FullScanActiveSectionId;
+                            var isScanned = !isScanning && _reviewCache.ContainsKey(sectionItem.Id);
+                            var rowClass = isActive ? "active" : isScanning ? "scanning" : isScanned ? "scan-done" : string.Empty;
                             <button type="button"
-                                    class="srs-section-row @(isActive ? "active" : string.Empty)"
+                                    class="srs-section-row @rowClass"
                                     @onclick="() => SelectSection(sectionItem.Id)">
                                 <span class="srs-letter-badge">@sectionItem.Letter</span>
                                 <span class="srs-section-main">
                                     <span class="srs-section-title">@sectionItem.Heading</span>
                                     <span class="srs-line-meta">Line @(sectionItem.LineStart)</span>
                                 </span>
+                                @if (isScanning)
+                                {
+                                    <span class="srs-scan-indicator srs-scan-indicator--active"></span>
+                                }
+                                else if (isScanned)
+                                {
+                                    <span class="srs-scan-indicator srs-scan-indicator--done">✓</span>
+                                }
                             </button>
                         }
                     }
@@ -316,87 +351,145 @@ else
                         <section class="srs-ai-review-pane">
                             <div class="srs-stage-title">AI Review</div>
 
-                            @if (AiReviewSteps.Count > 0)
+                            @if (IsRunningAiReview && SpokeResults.Count == 0)
                             {
-                                @for (var i = 0; i < CurrentSteps.Count; i++)
+                                <div class="srs-ai-review-card">
+                                    <div class="srs-ai-empty">
+                                        <span class="srs-ai-spinner srs-ai-spinner--sm"></span>
+                                        <p>@(ActiveRoutingMode == RoutingMode.Dynamic ? "Hub deciding which checks to run…" : "Starting…")</p>
+                                    </div>
+                                </div>
+                            }
+                            else if (SpokeResults.Count > 0)
+                            {
+                                @for (var i = 0; i < SpokeResults.Count; i++)
                                 {
-                                    var step = CurrentSteps[i];
-                                    var stepLabel = string.IsNullOrWhiteSpace(step.Label) ? $"Check {i + 1}" : step.Label;
-                                    var isRunningThis = IsRunningAiReview && i == CurrentRunningStepIndex;
-                                    var state = i < AiReviewSteps.Count ? AiReviewSteps[i] : null;
+                                    var result = SpokeResults[i];
+                                    var step = i < CurrentSteps.Count ? CurrentSteps[i] : null;
+                                    var stepLabel = string.IsNullOrWhiteSpace(result.Label) ? $"Check {i + 1}" : result.Label;
 
                                     <div class="srs-ai-step-card">
                                         <div class="srs-ai-step-header">
                                             <span class="srs-ai-step-label">@stepLabel</span>
-                                            @if (isRunningThis)
+                                            @if (result.Status == SpokeStatus.Running)
                                             {
                                                 <div class="srs-ai-spinner"></div>
                                             }
+                                            else if (result.Status == SpokeStatus.Done)
+                                            {
+                                                <span class="srs-ai-badge srs-ai-badge--yes">Done</span>
+                                            }
+                                            else if (result.Status == SpokeStatus.Failed)
+                                            {
+                                                <span class="srs-ai-badge srs-ai-badge--no">Failed</span>
+                                            }
                                         </div>
 
-                                        @if (isRunningThis && string.IsNullOrWhiteSpace(state?.RawResult))
+                                        @if (result.Status == SpokeStatus.Pending)
+                                        {
+                                            <div class="srs-ai-step-thinking srs-ai-step-waiting">Waiting…</div>
+                                        }
+                                        else if (result.Status == SpokeStatus.Running && string.IsNullOrWhiteSpace(result.RawResult))
                                         {
                                             <div class="srs-ai-step-thinking">Analysing…</div>
                                         }
-                                        else if (state is not null && !string.IsNullOrWhiteSpace(state.Error))
+                                        else if (!string.IsNullOrWhiteSpace(result.Error))
                                         {
-                                            <div class="srs-ai-error">@state.Error</div>
+                                            <div class="srs-ai-error">@result.Error</div>
                                         }
-                                        else if (state?.Parsed is not null && step.OutputSchema is not null)
+                                        else if (result.Parsed is not null && step?.OutputSchema is not null)
                                         {
                                             <div class="srs-ai-structured">
                                                 @foreach (var field in step.OutputSchema.Fields)
                                                 {
+                                                    var hasValue = result.Parsed.TryGetValue(field.Key, out var val);
+                                                    var isEmptyList = field.Type == "list" && hasValue &&
+                                                                      val.ValueKind == System.Text.Json.JsonValueKind.Array &&
+                                                                      !val.EnumerateArray().Any();
+                                                    var isMissingNonBoolean = field.Type != "boolean" && !hasValue;
+
+                                                    if (isEmptyList || isMissingNonBoolean) continue;
+
                                                     <div class="srs-ai-field">
                                                         <div class="srs-ai-field-label">@field.Label</div>
-                                                        @if (state.Parsed.TryGetValue(field.Key, out var val))
+                                                        @if (field.Type == "boolean")
                                                         {
-                                                            @if (field.Type == "boolean")
-                                                            {
-                                                                var isTrue = val.ValueKind == System.Text.Json.JsonValueKind.True ||
-                                                                             (val.ValueKind == System.Text.Json.JsonValueKind.String &&
-                                                                              val.GetString()?.Equals("true", StringComparison.OrdinalIgnoreCase) == true);
-                                                                <span class="srs-ai-badge @(isTrue ? "srs-ai-badge--yes" : "srs-ai-badge--no")">
-                                                                    @(isTrue ? "Yes" : "No")
-                                                                </span>
-                                                            }
-                                                            else if (field.Type == "list")
-                                                            {
-                                                                <ul class="srs-ai-field-list">
-                                                                    @if (val.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                                            var isTrue = hasValue && (val.ValueKind == System.Text.Json.JsonValueKind.True ||
+                                                                         (val.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                                                          val.GetString()?.Equals("true", StringComparison.OrdinalIgnoreCase) == true));
+                                                            <span class="srs-ai-badge @(isTrue ? "srs-ai-badge--yes" : "srs-ai-badge--no")">
+                                                                @(isTrue ? "Yes" : "No")
+                                                            </span>
+                                                        }
+                                                        else if (field.Type == "list")
+                                                        {
+                                                            <ul class="srs-ai-field-list">
+                                                                @if (val.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                                                {
+                                                                    foreach (var item in val.EnumerateArray())
                                                                     {
-                                                                        foreach (var item in val.EnumerateArray())
-                                                                        {
-                                                                            <li>@item.GetString()</li>
-                                                                        }
+                                                                        <li>@FormatInlineMarkup(item.GetString())</li>
                                                                     }
-                                                                    else
-                                                                    {
-                                                                        <li>@val.ToString()</li>
-                                                                    }
-                                                                </ul>
-                                                            }
-                                                            else
+                                                                }
+                                                                else
+                                                                {
+                                                                    <li>@FormatInlineMarkup(val.ToString())</li>
+                                                                }
+                                                            </ul>
+                                                        }
+                                                        else if (field.Type == "table")
+                                                        {
+                                                            @if (val.ValueKind == System.Text.Json.JsonValueKind.Array)
                                                             {
-                                                                <div class="srs-ai-field-text">@val.GetString()</div>
+                                                                var rows = val.EnumerateArray().ToList();
+                                                                var cols = rows.Count > 0
+                                                                    ? rows[0].EnumerateObject().Select(p => p.Name).ToList()
+                                                                    : new List<string>();
+                                                                @if (cols.Count > 0)
+                                                                {
+                                                                    <div class="srs-ai-table-wrap">
+                                                                        <table class="srs-ai-table">
+                                                                            <thead>
+                                                                                <tr>
+                                                                                    @foreach (var col in cols)
+                                                                                    {
+                                                                                        <th>@System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(col.Replace("_", " "))</th>
+                                                                                    }
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody>
+                                                                                @foreach (var row in rows)
+                                                                                {
+                                                                                    <tr>
+                                                                                        @foreach (var col in cols)
+                                                                                        {
+                                                                                            var cellVal = row.TryGetProperty(col, out var cv) ? cv.GetString() ?? "-" : "-";
+                                                                                            <td>@((MarkupString)FormatInline(cellVal))</td>
+                                                                                        }
+                                                                                    </tr>
+                                                                                }
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
+                                                                }
                                                             }
                                                         }
                                                         else
                                                         {
-                                                            <div class="srs-ai-field-text srs-ai-field-empty">—</div>
+                                                            <div class="srs-ai-field-text">@val.GetString()</div>
                                                         }
                                                     </div>
                                                 }
                                             </div>
                                         }
-                                        else if (state is not null && !string.IsNullOrWhiteSpace(state.RawResult))
+                                        else if (!string.IsNullOrWhiteSpace(result.RawResult))
                                         {
-                                            <div class="srs-ai-result srs-markdown">@((MarkupString)RenderMarkdown(state.RawResult))</div>
+                                            <div class="srs-ai-result srs-markdown">@((MarkupString)RenderMarkdown(result.RawResult))</div>
                                         }
                                     </div>
                                 }
                             }
-                            else if (CurrentSection is not null && OllamaService.HasSectionPrompt(CurrentSection.Heading))
+                            else if (CurrentSectionHasAiSupport)
                             {
                                 <div class="srs-ai-review-card">
                                     <div class="srs-ai-empty">
@@ -410,7 +503,7 @@ else
                                 <div class="srs-ai-review-card">
                                     <div class="srs-ai-empty srs-ai-empty--no-prompt">
                                         <div class="srs-ai-empty-icon srs-ai-empty-icon--muted">AI</div>
-                                        <p>No AI prompt configured for this section.</p>
+                                        <p>No AI prompt configured for this section. Switch to <strong>Dynamic</strong> to let the hub decide.</p>
                                     </div>
                                 </div>
                             }
@@ -447,5 +540,6 @@ else
         </div>
     </div>
 }
+
 
 

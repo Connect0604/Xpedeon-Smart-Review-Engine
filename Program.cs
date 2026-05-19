@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using SmartReviewSystem;
 using SmartReviewSystem.Services.DevOps;
 using SmartReviewSystem.Services.Ollama;
+using SmartReviewSystem.Services.Orchestration;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
@@ -14,5 +15,12 @@ builder.Services.AddHttpClient<IOllamaService, OllamaService>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(5);
 });
+
+builder.Services.AddScoped<ConfigRoutingStrategy>();
+builder.Services.AddHttpClient<LlmRoutingStrategy>(client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(5);
+});
+builder.Services.AddScoped<ReviewOrchestrator>();
 
 await builder.Build().RunAsync();
