@@ -90,6 +90,9 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private string DevOpsUnsupportedExtensionSummary = string.Empty;
     private string DevOpsConnectionStatus = "Idle";
     private bool IsDevOpsFiltersCollapsed = true;
+    private readonly Dictionary<string, (DevOpsStoryItem Story, DevOpsAttachmentItem Attachment)> _selectedDevOpsAttachments = new(StringComparer.OrdinalIgnoreCase);
+    private int SelectedAttachmentCount => _selectedDevOpsAttachments.Count;
+    private string? _selectedSourceFile;
 
     protected override void OnInitialized()
     {
@@ -154,7 +157,6 @@ public partial class Home : ComponentBase, IAsyncDisposable
             ActiveRoutingMode == RoutingMode.Dynamic ||
             OllamaService.HasSectionPrompt(CurrentSection.Heading)
         );
-
     private IEnumerable<SectionModel> FilteredSections
     {
         get
@@ -174,6 +176,11 @@ public partial class Home : ComponentBase, IAsyncDisposable
                 sections = sections.Where(section =>
                     section.Heading.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                     section.Content.Contains(query, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(_selectedSourceFile))
+            {
+                sections = sections.Where(section => string.Equals(section.SourceFile, _selectedSourceFile, StringComparison.OrdinalIgnoreCase));
             }
 
             return sections;
@@ -267,6 +274,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
     {
         DevOpsError = string.Empty;
         UploadError = string.Empty;
+        _selectedDevOpsAttachments.Clear();
         DevOpsStories = new List<DevOpsStoryItem>();
         DevOpsTotalStories = 0;
         DevOpsStoriesWithAttachments = 0;
@@ -369,6 +377,90 @@ public partial class Home : ComponentBase, IAsyncDisposable
         }
     }
 
+    private IReadOnlyList<string> AvailableSourceFiles => Sections
+        .Select(s => s.SourceFile)
+        .Where(s => !string.IsNullOrWhiteSpace(s))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private static string BuildAttachmentSelectionKey(DevOpsStoryItem story, DevOpsAttachmentItem attachment)
+    {
+        return $"{story.Id}|{attachment.Url}";
+    }
+
+    private bool IsAttachmentSelected(DevOpsStoryItem story, DevOpsAttachmentItem attachment)
+    {
+        return _selectedDevOpsAttachments.ContainsKey(BuildAttachmentSelectionKey(story, attachment));
+    }
+
+    private void ToggleAttachmentSelection(DevOpsStoryItem story, DevOpsAttachmentItem attachment, object? value)
+    {
+        if (!attachment.IsSupported)
+        {
+            return;
+        }
+
+        var key = BuildAttachmentSelectionKey(story, attachment);
+        var isChecked = value as bool? == true;
+        if (isChecked)
+        {
+            _selectedDevOpsAttachments[key] = (story, attachment);
+        }
+        else
+        {
+            _selectedDevOpsAttachments.Remove(key);
+        }
+    }
+
+    private void ClearSelectedAttachments()
+    {
+        _selectedDevOpsAttachments.Clear();
+    }
+
+    private async Task AnalyzeSelectedDevOpsAttachmentsAsync()
+    {
+        UploadError = string.Empty;
+        DevOpsError = string.Empty;
+
+        var selected = _selectedDevOpsAttachments.Values
+            .Where(s => s.Attachment.IsSupported)
+            .OrderBy(s => s.Story.Id)
+            .ThenBy(s => s.Attachment.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (selected.Count == 0)
+        {
+            DevOpsError = "Select one or more supported text attachments first.";
+            return;
+        }
+
+        try
+        {
+            var mergedSections = new List<SectionModel>();
+            DevOpsStoryItem? firstStory = null;
+
+            foreach (var (story, attachment) in selected)
+            {
+                var content = await AzureDevOpsService.DownloadAttachmentTextAsync(attachment.Url, DevOpsPatToken.Trim(), CancellationToken.None);
+                firstStory ??= story;
+                var sourceFile = $"US-{story.Id}-{attachment.Name}";
+                mergedSections.AddRange(ParseSections(content, sourceFile));
+            }
+
+            ActiveStory = firstStory;
+            var fileLabel = selected.Count == 1
+                ? $"US-{selected[0].Story.Id}-{selected[0].Attachment.Name}"
+                : $"US-batch-{selected.Count}-attachments.md";
+            LoadSections(fileLabel, mergedSections);
+            _selectedDevOpsAttachments.Clear();
+        }
+        catch (Exception ex)
+        {
+            DevOpsError = $"Failed to analyze selected attachments: {ex.Message}";
+        }
+    }
+
     private static bool IsHtmlAttachment(string fileName)
     {
         var ext = Path.GetExtension(fileName);
@@ -415,13 +507,28 @@ public partial class Home : ComponentBase, IAsyncDisposable
 
     private void ProcessUploadedContent(string fileName, string content)
     {
+        LoadSections(fileName, ParseSections(content, fileName));
+    }
+
+    private void LoadSections(string fileName, List<SectionModel> parsedSections)
+    {
         UploadedFileName = fileName;
         ActiveCustomTabName = null;
         Sections.Clear();
-        Sections.AddRange(ParseSections(content));
+        Sections.AddRange(parsedSections.Select((section, index) => new SectionModel
+        {
+            Id = $"section-{index + 1}",
+            Letter = section.Letter,
+            Heading = section.Heading,
+            LineStart = section.LineStart,
+            LineCount = section.LineCount,
+            Content = section.Content,
+            SourceFile = section.SourceFile
+        }));
         SelectedSectionId = Sections.FirstOrDefault()?.Id;
         SectionSearchText = string.Empty;
         SectionFilter = SectionFilterMode.All;
+        RefreshSourceFilters();
 
         if (Sections.Count == 0)
         {
@@ -447,6 +554,8 @@ public partial class Home : ComponentBase, IAsyncDisposable
         DevOpsUnsupportedExtensionSummary = string.Empty;
         DevOpsConnectionStatus = "Idle";
         DevOpsBuiltQuery = string.Empty;
+        _selectedDevOpsAttachments.Clear();
+        _selectedSourceFile = null;
         SpokeResults = new();
         CurrentSteps = Array.Empty<SectionPromptStep>();
         IsRunningAiReview = false;
@@ -602,7 +711,6 @@ public partial class Home : ComponentBase, IAsyncDisposable
             IsRunningAiReview = false;
         }
     }
-
     private void CancelActiveReview()
     {
         _reviewCts?.Cancel();
@@ -708,7 +816,86 @@ public partial class Home : ComponentBase, IAsyncDisposable
         return Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
     }
 
-    private static List<SectionModel> ParseSections(string markdown)
+    private void RefreshSourceFilters()
+    {
+        _selectedSourceFile = null;
+    }
+
+    private void SelectSourceFile(string sourceFile)
+    {
+        _selectedSourceFile = sourceFile;
+        var filtered = FilteredSections.ToList();
+        if (filtered.Count == 0)
+        {
+            SelectedSectionId = null;
+            return;
+        }
+
+        if (!filtered.Any(s => s.Id == SelectedSectionId))
+        {
+            SelectedSectionId = filtered[0].Id;
+        }
+    }
+
+    private void ShowAllSourceFiles()
+    {
+        _selectedSourceFile = null;
+        var filtered = FilteredSections.ToList();
+        if (filtered.Count == 0)
+        {
+            SelectedSectionId = null;
+            return;
+        }
+
+        if (!filtered.Any(s => s.Id == SelectedSectionId))
+        {
+            SelectedSectionId = filtered[0].Id;
+        }
+    }
+
+    private void RemoveSourceFileFromList(string sourceFile)
+    {
+        var remaining = Sections
+            .Where(section => !string.Equals(section.SourceFile, sourceFile, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (remaining.Count == Sections.Count)
+        {
+            return;
+        }
+
+        Sections.Clear();
+        Sections.AddRange(remaining.Select((section, index) => new SectionModel
+        {
+            Id = $"section-{index + 1}",
+            Letter = section.Letter,
+            Heading = section.Heading,
+            LineStart = section.LineStart,
+            LineCount = section.LineCount,
+            Content = section.Content,
+            SourceFile = section.SourceFile
+        }));
+
+        if (string.Equals(_selectedSourceFile, sourceFile, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedSourceFile = null;
+        }
+
+        _reviewCache.Clear();
+
+        if (Sections.Count == 0)
+        {
+            SelectedSectionId = null;
+            return;
+        }
+
+        if (!Sections.Any(s => s.Id == SelectedSectionId))
+        {
+            SelectedSectionId = Sections[0].Id;
+        }
+    }
+
+    private static List<SectionModel> ParseSections(string markdown, string sourceFile)
     {
         var normalized = markdown.Replace("\r\n", "\n");
         var lines = normalized.Split('\n');
@@ -728,7 +915,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
             {
                 if (encounteredHeading || buffer.Count > 0)
                 {
-                    AddSection(sections, currentHeading, currentStart, buffer);
+                    AddSection(sections, currentHeading, currentStart, buffer, sourceFile);
                 }
 
                 currentHeading = headingMatch.Groups[1].Value.Trim();
@@ -743,7 +930,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
 
         if (encounteredHeading || buffer.Count > 0)
         {
-            AddSection(sections, currentHeading, currentStart, buffer);
+            AddSection(sections, currentHeading, currentStart, buffer, sourceFile);
         }
 
         if (sections.Count == 0)
@@ -755,14 +942,15 @@ public partial class Home : ComponentBase, IAsyncDisposable
                 Heading = "Preamble",
                 LineStart = 1,
                 LineCount = lines.Length,
-                Content = markdown.Trim()
+                Content = markdown.Trim(),
+                SourceFile = sourceFile
             });
         }
 
         return sections;
     }
 
-    private static void AddSection(List<SectionModel> sections, string heading, int lineStart, List<string> lines)
+    private static void AddSection(List<SectionModel> sections, string heading, int lineStart, List<string> lines, string sourceFile)
     {
         var parsed = ParseHeading(heading, sections.Count);
         var content = string.Join('\n', lines).TrimEnd();
@@ -774,7 +962,8 @@ public partial class Home : ComponentBase, IAsyncDisposable
             Heading = parsed.Title,
             LineStart = lineStart,
             LineCount = Math.Max(1, lines.Count),
-            Content = content
+            Content = content,
+            SourceFile = sourceFile
         });
     }
 
@@ -1117,5 +1306,4 @@ public partial class Home : ComponentBase, IAsyncDisposable
             .Replace("<", "&lt;", StringComparison.Ordinal)
             .Replace(">", "&gt;", StringComparison.Ordinal);
     }
-
 }

@@ -80,6 +80,14 @@
                 <button type="button" class="srs-btn srs-btn-primary srs-load-btn" @onclick="LoadStoriesFromDevOpsAsync" disabled="@IsLoadingStories">
                     @(IsLoadingStories ? "Loading..." : "Load user stories")
                 </button>
+                <div class="srs-devops-row" style="margin-top: 10px;">
+                    <button type="button" class="srs-btn srs-btn-primary" @onclick="AnalyzeSelectedDevOpsAttachmentsAsync" disabled="@(SelectedAttachmentCount == 0 || IsLoadingStories)">
+                        Analyze selected (@SelectedAttachmentCount)
+                    </button>
+                    <button type="button" class="srs-btn srs-btn-ghost" @onclick="ClearSelectedAttachments" disabled="@(SelectedAttachmentCount == 0)">
+                        Clear selection
+                    </button>
+                </div>
 
                 @if (DevOpsTotalStories > 0)
                 {
@@ -116,6 +124,7 @@
                                     <th>Assigned To</th>
                                     <th>State</th>
                                     <th>Tags</th>
+                                    <th>Orchestrator Phase</th>
                                     <th>Attached Files</th>
                                 </tr>
                             </thead>
@@ -129,6 +138,16 @@
                                         <td>@story.AssignedTo</td>
                                         <td>@story.State</td>
                                         <td>@(string.IsNullOrWhiteSpace(story.Tags) ? "-" : story.Tags)</td>
+                                        <td>
+                                            @if (string.IsNullOrWhiteSpace(story.OrchestratorPhase))
+                                            {
+                                                <span>-</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="srs-orch-phase-badge">@story.OrchestratorPhase</span>
+                                            }
+                                        </td>
                                         <td>
                                             @if (story.Attachments.Count == 0)
                                             {
@@ -147,16 +166,23 @@
                                                             <summary>type: @typeGroup.Key.ToLowerInvariant() (@typeGroup.Count())</summary>
                                                             @foreach (var attachment in typeGroup)
                                                             {
-                                                                <button type="button" class="srs-attachment-btn" @onclick="() => AnalyzeDevOpsAttachmentAsync(story, attachment)" disabled="@(!attachment.IsSupported)">
-                                                                    <span>@attachment.Name</span>
-                                                                    <span class="srs-attachment-meta">
-                                                                        @attachment.DisplaySize | @attachment.AttachedBy | @attachment.DisplayAttachedOn
-                                                                        @if (attachment.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || attachment.Name.EndsWith(".htm", StringComparison.OrdinalIgnoreCase))
-                                                                        {
-                                                                            <text> | open in browser</text>
-                                                                        }
-                                                                    </span>
-                                                                </button>
+                                                                <div class="srs-attachment-row">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked="@IsAttachmentSelected(story, attachment)"
+                                                                        @onchange="(e) => ToggleAttachmentSelection(story, attachment, e.Value)"
+                                                                        disabled="@(!attachment.IsSupported)" />
+                                                                    <button type="button" class="srs-attachment-btn" @onclick="() => AnalyzeDevOpsAttachmentAsync(story, attachment)" disabled="@(!attachment.IsSupported)">
+                                                                        <span>@attachment.Name</span>
+                                                                        <span class="srs-attachment-meta">
+                                                                            @attachment.DisplaySize | @attachment.AttachedBy | @attachment.DisplayAttachedOn
+                                                                            @if (attachment.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || attachment.Name.EndsWith(".htm", StringComparison.OrdinalIgnoreCase))
+                                                                            {
+                                                                                <text> | open in browser</text>
+                                                                            }
+                                                                        </span>
+                                                                    </button>
+                                                                </div>
                                                             }
                                                         </details>
                                                     }
@@ -305,6 +331,29 @@ else
                         </button>
                     }
                 </div>
+                @if (AvailableSourceFiles.Count > 0)
+                {
+                    <div class="srs-source-tags" role="group" aria-label="Selected source files">
+                        <button type="button" class="srs-source-chip @(string.IsNullOrWhiteSpace(_selectedSourceFile) ? "active" : string.Empty)" @onclick="ShowAllSourceFiles">All files</button>
+                        @foreach (var sourceFile in AvailableSourceFiles)
+                        {
+                            var isActiveSource = string.Equals(_selectedSourceFile, sourceFile, StringComparison.OrdinalIgnoreCase);
+                            <span class="srs-source-chip-wrap @(isActiveSource ? "active" : string.Empty)">
+                                <button type="button" class="srs-source-chip" @onclick="() => SelectSourceFile(sourceFile)">
+                                    @sourceFile
+                                </button>
+                                <button type="button"
+                                        class="srs-source-chip-remove"
+                                        title="Remove file from list"
+                                        aria-label="Remove @sourceFile"
+                                        @onclick="() => RemoveSourceFileFromList(sourceFile)"
+                                        @onclick:stopPropagation="true">
+                                    ×
+                                </button>
+                            </span>
+                        }
+                    </div>
+                }
                 <div class="srs-sections-list">
                     @if (filteredSections.Count == 0)
                     {
@@ -324,6 +373,7 @@ else
                                 <span class="srs-letter-badge">@sectionItem.Letter</span>
                                 <span class="srs-section-main">
                                     <span class="srs-section-title">@sectionItem.Heading</span>
+                                    <span class="srs-line-meta srs-line-meta-source">@sectionItem.SourceFile</span>
                                     <span class="srs-line-meta">Line @(sectionItem.LineStart)</span>
                                 </span>
                                 @if (isScanning)
@@ -517,6 +567,7 @@ else
                                         <span class="srs-letter-badge large">@selectedSection.Letter</span>
                                         <div class="srs-focus-title">
                                             <h2>@selectedSection.Heading</h2>
+                                            <div class="srs-source-file-badge">@selectedSection.SourceFile</div>
                                             <div class="srs-center-meta">Line @(selectedSection.LineStart) - @(selectedSection.LineCount) lines</div>
                                         </div>
                                     </div>

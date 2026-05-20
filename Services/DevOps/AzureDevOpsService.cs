@@ -62,6 +62,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             var state = item.Fields.TryGetValue("System.State", out var stateValue) ? stateValue?.ToString() ?? "Unknown" : "Unknown";
             var assigned = item.Fields.TryGetValue("System.AssignedTo", out var assignedValue) ? ExtractAssignedTo(assignedValue) : "Unassigned";
             var tags = item.Fields.TryGetValue("System.Tags", out var tagsValue) ? tagsValue?.ToString() ?? string.Empty : string.Empty;
+            var orchestratorPhase = item.Fields.TryGetValue("Custom.OrchestratorPhase", out var phaseValue) ? phaseValue?.ToString() ?? string.Empty : string.Empty;
 
             var attachments = (item.Relations ?? new List<RelationDto>())
                 .Where(r => string.Equals(r.Rel, "AttachedFile", StringComparison.OrdinalIgnoreCase))
@@ -93,6 +94,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 State = state,
                 AssignedTo = assigned,
                 Tags = tags,
+                OrchestratorPhase = orchestratorPhase,
                 Attachments = attachments
             });
         }
