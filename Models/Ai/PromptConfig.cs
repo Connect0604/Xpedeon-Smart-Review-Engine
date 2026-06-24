@@ -9,6 +9,8 @@ public sealed class MasterPromptConfig
 public sealed class SectionPromptConfig
 {
     public string Name { get; set; } = string.Empty;
+    public RemoteMcpServerConfig? RemoteMCPServer { get; set; }
+    public string? Tool { get; set; }
     public List<SectionPromptStep> Prompts { get; set; } = new();
 }
 
@@ -30,4 +32,10 @@ public sealed class OutputFieldConfig
     public string Label { get; set; } = string.Empty;
     /// <summary>text | list | boolean</summary>
     public string Type { get; set; } = "text";
+}
+
+public sealed class RemoteMcpServerConfig
+{
+    public string Type { get; set; } = "http";
+    public string Url { get; set; } = string.Empty;
 }

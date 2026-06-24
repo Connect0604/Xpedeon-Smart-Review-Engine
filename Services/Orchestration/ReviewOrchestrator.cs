@@ -8,8 +8,18 @@ namespace SmartReviewSystem.Services.Orchestration;
 public sealed class ReviewOrchestrator
 {
     private readonly IOllamaService _ollama;
+    private readonly IPocoDbComparisonService _pocoDbComparison;
+    private readonly IDevExpressPropertyValidationService _devExpressValidator;
 
-    public ReviewOrchestrator(IOllamaService ollama) => _ollama = ollama;
+    public ReviewOrchestrator(
+        IOllamaService ollama,
+        IPocoDbComparisonService pocoDbComparison,
+        IDevExpressPropertyValidationService devExpressValidator)
+    {
+        _ollama = ollama;
+        _pocoDbComparison = pocoDbComparison;
+        _devExpressValidator = devExpressValidator;
+    }
 
     public async Task RunAsync(
         string heading,
@@ -42,10 +52,23 @@ public sealed class ReviewOrchestrator
         {
             var hasSchema = step.OutputSchema?.Fields.Count > 0;
 
-            await foreach (var token in _ollama.StreamStepAsync(heading, step, content, ct))
+            if (_pocoDbComparison.CanHandle(heading, step))
             {
-                result.RawResult += token;
-                if (!hasSchema) onUpdate();
+                result.RawResult = await _pocoDbComparison.ExecuteAsync(heading, content, ct);
+                onUpdate();
+            }
+            else if (_devExpressValidator.CanHandle(heading, step))
+            {
+                result.RawResult = await _devExpressValidator.ExecuteAsync(heading, content, ct);
+                onUpdate();
+            }
+            else
+            {
+                await foreach (var token in _ollama.StreamStepAsync(heading, step, content, ct))
+                {
+                    result.RawResult += token;
+                    if (!hasSchema) onUpdate();
+                }
             }
 
             TryParseResult(result, step);

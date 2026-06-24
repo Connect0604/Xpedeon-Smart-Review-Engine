@@ -241,13 +241,30 @@ else
             <div class="srs-topbar-left">
                 @if (ActiveStory is not null)
                 {
-                    <span class="srs-story-id-pill">#@ActiveStory.Id</span>
+                    <a class="srs-story-id-pill"
+                       href="@($"https://dev.azure.com/{DevOpsOrganization}/{DevOpsProject}/_workitems/edit/{ActiveStory.Id}")"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       title="Open user story in Azure DevOps">
+                        #@ActiveStory.Id
+                    </a>
                     <span class="srs-story-type-pill">@ActiveStory.WorkItemType</span>
                     <span class="srs-story-title">@ActiveStory.Title</span>
                     <span class="srs-topbar-divider"></span>
                 }
                 <span class="srs-file-pill">@UploadedFileName</span>
                 <span class="srs-count-pill">@Sections.Count sections</span>
+                <span class="srs-model-pill @(LastCallUsedFallback ? "srs-model-pill-fallback" : string.Empty)" title="Configured model chain">
+                    Model: @ModelDisplay
+                    @if (!string.IsNullOrWhiteSpace(LastUsedModel))
+                    {
+                        <text> | Active: @LastUsedModel</text>
+                        @if (LastCallUsedFallback)
+                        {
+                            <text> | Fallback active (primary: @PrimaryModel)</text>
+                        }
+                    }
+                </span>
             </div>
             <div class="srs-topbar-actions">
                 @if (IsFullScanRunning)
@@ -266,7 +283,7 @@ else
                             @(_reviewCache.Count > 0 ? "Re-scan All" : "Scan All Sections")
                         </button>
                     }
-                    @if (CurrentSectionHasAiSupport)
+                    @if (true)
                     {
                         @if (IsRunningAiReview)
                         {
@@ -478,12 +495,12 @@ else
                                                                 {
                                                                     foreach (var item in val.EnumerateArray())
                                                                     {
-                                                                        <li>@FormatInlineMarkup(item.GetString())</li>
+                                                                        <li>@FormatInlineMarkup(JsonElementToDisplay(item))</li>
                                                                     }
                                                                 }
                                                                 else
                                                                 {
-                                                                    <li>@FormatInlineMarkup(val.ToString())</li>
+                                                                    <li>@FormatInlineMarkup(JsonElementToDisplay(val))</li>
                                                                 }
                                                             </ul>
                                                         }
@@ -497,11 +514,19 @@ else
                                                                     : new List<string>();
                                                                 @if (cols.Count > 0)
                                                                 {
+                                                                    var isPocoComparison = cols.Contains("status") && cols.Contains("rectification_prompt");
+                                                                    var hiddenCompactCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                                                                    {
+                                                                        "in_db", "in_poco", "error_message"
+                                                                    };
+                                                                    var displayCols = isPocoComparison
+                                                                        ? cols.Where(c => !hiddenCompactCols.Contains(c)).ToList()
+                                                                        : cols;
                                                                     <div class="srs-ai-table-wrap">
                                                                         <table class="srs-ai-table">
                                                                             <thead>
                                                                                 <tr>
-                                                                                    @foreach (var col in cols)
+                                                                                    @foreach (var col in displayCols)
                                                                                     {
                                                                                         <th>@System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(col.Replace("_", " "))</th>
                                                                                     }
@@ -510,10 +535,16 @@ else
                                                                             <tbody>
                                                                                 @foreach (var row in rows)
                                                                                 {
-                                                                                    <tr>
-                                                                                        @foreach (var col in cols)
+                                                                                    var rowStatus = row.TryGetProperty("status", out var statusVal)
+                                                                                        ? JsonElementToDisplay(statusVal)
+                                                                                        : string.Empty;
+                                                                                    var rowClass = rowStatus.Equals("MISSING_IN_POCO", StringComparison.OrdinalIgnoreCase)
+                                                                                        ? "srs-ai-row-missing-poco"
+                                                                                        : string.Empty;
+                                                                                    <tr class="@rowClass">
+                                                                                        @foreach (var col in displayCols)
                                                                                         {
-                                                                                            var cellVal = row.TryGetProperty(col, out var cv) ? cv.GetString() ?? "-" : "-";
+                                                                                            var cellVal = row.TryGetProperty(col, out var cv) ? JsonElementToDisplay(cv) : "-";
                                                                                             <td>@((MarkupString)FormatInline(cellVal))</td>
                                                                                         }
                                                                                     </tr>
@@ -526,7 +557,7 @@ else
                                                         }
                                                         else
                                                         {
-                                                            <div class="srs-ai-field-text">@val.GetString()</div>
+                                                            <div class="srs-ai-field-text">@JsonElementToDisplay(val)</div>
                                                         }
                                                     </div>
                                                 }
@@ -577,12 +608,130 @@ else
                             <section class="srs-document-card">
                                 <div class="srs-section-label-row">
                                     <span class="srs-panel-label">Section content</span>
-                                    <span>Original markdown</span>
+                                    <div class="srs-section-actions">
+                                        <span>Original markdown</span>
+                                        <button type="button" class="srs-btn srs-btn-ghost" @onclick="CopyCurrentSectionContentAsync">Copy</button>
+                                        @if (CurrentSectionIsRazorPage)
+                                        {
+                                            <button type="button" class="srs-btn srs-btn-primary" @onclick="RunDevExpressPropertyValidationAsync" disabled="@IsRunningAiReview">
+                                                Validate DevExpress Properties
+                                            </button>
+                                            <button type="button" class="srs-btn srs-btn-ghost" @onclick="GenerateRazorMockScreen">Generate Mock (Fast)</button>
+                                            <button type="button" class="srs-btn srs-btn-primary" @onclick="GenerateRazorMockScreenWithAiAsync" disabled="@IsGeneratingAiMock">
+                                                @(IsGeneratingAiMock ? "Generating AI Design..." : "Generate Mock (AI Design)")
+                                            </button>
+                                            <button type="button" class="srs-btn srs-btn-ghost" @onclick="GenerateRazorMockComparisonAsync" disabled="@IsGeneratingComparison">
+                                                @(IsGeneratingComparison ? "Generating Comparison..." : "Generate Comparison")
+                                            </button>
+                                        }
+                                    </div>
                                 </div>
                                 <div class="srs-markdown">
                                     @((MarkupString)RenderMarkdown(selectedSection.Content, ActiveHighlightTerms))
                                 </div>
+                                @if (IsGeneratingComparison || ComparisonProgressPercent > 0)
+                                {
+                                    <div class="srs-compare-progress">
+                                        <div class="srs-compare-progress-head">
+                                            <span>@(string.IsNullOrWhiteSpace(ComparisonProgressLabel) ? "Generating comparison..." : ComparisonProgressLabel)</span>
+                                            <span>@ComparisonProgressPercent%</span>
+                                        </div>
+                                        <div class="srs-compare-progress-track">
+                                            <div class="srs-compare-progress-fill" style="width:@($"{ComparisonProgressPercent}%")"></div>
+                                        </div>
+                                    </div>
+                                }
                             </section>
+
+                            <section class="srs-document-card">
+                                <div class="srs-section-label-row">
+                                    <span class="srs-panel-label">Generated mock</span>
+                                    <div class="srs-section-actions">
+                                        <span>Razor parser preview</span>
+                                        <button type="button" class="srs-btn srs-btn-ghost" @onclick="CaptureGeneratedMockAsync" disabled="@(GeneratedMockScreen is null || IsCapturingMockPng)">
+                                            @(IsCapturingMockPng ? "Capturing..." : "Capture PNG")
+                                        </button>
+                                    </div>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(MockGeneratorError))
+                                {
+                                    <div class="srs-mock-empty">@MockGeneratorError</div>
+                                }
+                                else if (GeneratedMockScreen is null)
+                                {
+                                    <div class="srs-mock-empty">Click "Generate Mock (AI Design)" to build a design-oriented mock from Razor code.</div>
+                                }
+                                else
+                                {
+                                    <div class="srs-mock-preview">
+                                        <div class="srs-mock-render" id="srs-generated-mock-render">
+                                            @((MarkupString)GeneratedMockHtml)
+                                        </div>
+                                        <div class="srs-mock-json-wrap">
+                                            <pre class="srs-mock-json"><code>@GeneratedMockJson</code></pre>
+                                        </div>
+                                    </div>
+                                }
+                            </section>
+
+                            @if (!string.IsNullOrWhiteSpace(ComparisonReportMarkdown))
+                            {
+                                <section class="srs-document-card">
+                                    <div class="srs-section-label-row">
+                                        <span class="srs-panel-label">Razor vs Mockup Comparison</span>
+                                        <span>Deterministic comparison report</span>
+                                    </div>
+                                    @if (TryGetComparisonStructurePanels(out var razorStructure, out var mockupStructure))
+                                    {
+                                        <div class="srs-compare-vertical">
+                                            <article class="srs-compare-panel">
+                                                <h4>Razor</h4>
+                                                <pre><code>@razorStructure</code></pre>
+                                            </article>
+                                            <article class="srs-compare-panel">
+                                                <h4>Mockup</h4>
+                                                <pre><code>@mockupStructure</code></pre>
+                                            </article>
+                                        </div>
+                                    }
+                                    <div class="srs-markdown">
+                                        @((MarkupString)RenderMarkdown(ComparisonReportMarkdown))
+                                    </div>
+                                </section>
+                            }
+
+                            @if (ShowMockAttachmentPicker)
+                            {
+                                <section class="srs-document-card" id="srs-mock-attachment-picker">
+                                    <div class="srs-section-label-row">
+                                        <span class="srs-panel-label">Select Mock Attachment</span>
+                                        <span>Story #@ActiveStory?.Id</span>
+                                    </div>
+                                    <div class="srs-mock-picker">
+                                        @foreach (var attachment in AvailableMockAttachments)
+                                        {
+                                            var optionId = $"mock-{attachment.Url.GetHashCode()}";
+                                            <label class="srs-mock-option" for="@optionId">
+                                                <input id="@optionId"
+                                                       type="radio"
+                                                       name="mockAttachment"
+                                                       checked="@string.Equals(SelectedMockAttachmentUrl, attachment.Url, StringComparison.OrdinalIgnoreCase)"
+                                                       @onchange="@(() => SelectedMockAttachmentUrl = attachment.Url)" />
+                                                <span class="srs-mock-option-text">
+                                                    <strong>@attachment.Name</strong>
+                                                    <span class="srs-line-meta">@attachment.DisplaySize | @attachment.AttachedBy | @attachment.DisplayAttachedOn</span>
+                                                </span>
+                                            </label>
+                                        }
+                                        <div class="srs-mock-picker-actions">
+                                            <button type="button" class="srs-btn srs-btn-primary" @onclick="ConfirmMockAttachmentComparisonAsync" disabled="@IsGeneratingComparison">
+                                                @(IsGeneratingComparison ? "Generating Comparison..." : "Compare with Selected Mock")
+                                            </button>
+                                            <button type="button" class="srs-btn srs-btn-ghost" @onclick="CancelMockAttachmentPicker">Cancel</button>
+                                        </div>
+                                    </div>
+                                </section>
+                            }
                         </section>
 
                         </div>

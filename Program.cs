@@ -21,6 +21,14 @@ builder.Services.AddHttpClient<LlmRoutingStrategy>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(5);
 });
+builder.Services.AddHttpClient<IPocoDbComparisonService, PocoDbComparisonService>(client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(2);
+});
+builder.Services.AddHttpClient<IDevExpressPropertyValidationService, DevExpressPropertyValidationService>(client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(2);
+});
 builder.Services.AddScoped<ReviewOrchestrator>();
 
 await builder.Build().RunAsync();

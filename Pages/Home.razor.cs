@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
@@ -19,6 +19,8 @@ public partial class Home : ComponentBase, IAsyncDisposable
 {
     [Inject]
     private IJSRuntime JS { get; set; } = default!;
+    [Inject]
+    private HttpClient Http { get; set; } = default!;
     [Inject]
     private IAzureDevOpsService AzureDevOpsService { get; set; } = default!;
     [Inject]
@@ -75,7 +77,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private string DevOpsCondition = "[System.WorkItemType] = 'User Story' AND [System.State] <> 'Closed'";
     private string DevOpsBuiltQuery = string.Empty;
     private bool UseAdvancedWiql;
-    private string DevOpsTagFilter = "Master AI Development";
+    private string DevOpsTagFilter = "AI development with revised orchestration"; //"Master AI Development";
     private string DevOpsStateFilter = "Any";
     private string DevOpsAssignedFilter = string.Empty;
     private bool DevOpsOnlyWithAttachments = true;
@@ -93,6 +95,20 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private readonly Dictionary<string, (DevOpsStoryItem Story, DevOpsAttachmentItem Attachment)> _selectedDevOpsAttachments = new(StringComparer.OrdinalIgnoreCase);
     private int SelectedAttachmentCount => _selectedDevOpsAttachments.Count;
     private string? _selectedSourceFile;
+    private RazorMockScreen? GeneratedMockScreen;
+    private string GeneratedMockJson = string.Empty;
+    private string GeneratedMockHtml = string.Empty;
+    private string MockGeneratorError = string.Empty;
+    private bool IsGeneratingAiMock;
+    private bool IsCapturingMockPng;
+    private bool IsGeneratingComparison;
+    private string ComparisonReportMarkdown = string.Empty;
+    private int ComparisonProgressPercent;
+    private string ComparisonProgressLabel = string.Empty;
+    private CancellationTokenSource? _comparisonProgressCts;
+    private bool ShowMockAttachmentPicker;
+    private List<DevOpsAttachmentItem> AvailableMockAttachments = new();
+    private string? SelectedMockAttachmentUrl;
 
     protected override void OnInitialized()
     {
@@ -148,6 +164,8 @@ public partial class Home : ComponentBase, IAsyncDisposable
             ? "Azure DevOps source"
             : "Local upload source";
     private SectionModel? CurrentSection => Sections.FirstOrDefault(s => s.Id == SelectedSectionId);
+    private bool CurrentSectionIsRazorPage =>
+        CurrentSection is not null && IsLikelyRazorSection(CurrentSection.Heading, CurrentSection.Content);
 
     private IRoutingStrategy ActiveStrategy =>
         ActiveRoutingMode == RoutingMode.Static ? ConfigStrategy : LlmStrategy;
@@ -157,6 +175,10 @@ public partial class Home : ComponentBase, IAsyncDisposable
             ActiveRoutingMode == RoutingMode.Dynamic ||
             OllamaService.HasSectionPrompt(CurrentSection.Heading)
         );
+    private string ModelDisplay => OllamaService.GetConfiguredModelsDisplay();
+    private string PrimaryModel => OllamaService.GetPrimaryModel();
+    private string? LastUsedModel => OllamaService.GetLastUsedModel();
+    private bool LastCallUsedFallback => OllamaService.WasLastCallFallbackUsed();
     private IEnumerable<SectionModel> FilteredSections
     {
         get
@@ -529,6 +551,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
         SectionSearchText = string.Empty;
         SectionFilter = SectionFilterMode.All;
         RefreshSourceFilters();
+        ResetMockAttachmentSelection();
 
         if (Sections.Count == 0)
         {
@@ -565,6 +588,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
         FullScanTotal = 0;
         _reviewCache.Clear();
         CancelActiveReview();
+        ResetMockGeneratorState();
     }
 
     private void SelectSection(string sectionId)
@@ -582,6 +606,7 @@ public partial class Home : ComponentBase, IAsyncDisposable
 
         SelectedSectionId = sectionId;
         IsRunningAiReview = false;
+        ResetMockGeneratorState();
 
         if (_reviewCache.TryGetValue(sectionId, out var cached))
         {
@@ -615,6 +640,65 @@ public partial class Home : ComponentBase, IAsyncDisposable
         catch (OperationCanceledException) { }
         finally
         {
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunDevExpressPropertyValidationAsync()
+    {
+        if (CurrentSection is null || IsRunningAiReview || IsFullScanRunning || !CurrentSectionIsRazorPage)
+            return;
+
+        CancelActiveReview();
+        _reviewCts = new CancellationTokenSource();
+        var ct = _reviewCts.Token;
+
+        IsRunningAiReview = true;
+        SpokeResults = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        StateHasChanged();
+
+        try
+        {
+            var steps = OllamaService
+                .GetPromptSteps(CurrentSection.Heading)
+                .Where(s => s.Label.Equals("DevExpress Control Property Validation", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (steps.Count == 0)
+            {
+                SpokeResults = new List<SpokeResult>
+                {
+                    new SpokeResult
+                    {
+                        Label = "DevExpress Control Property Validation",
+                        Status = SpokeStatus.Failed,
+                        Error = "Validation step is not configured under Razor Page prompts."
+                    }
+                };
+                return;
+            }
+
+            CurrentSteps = steps;
+            SpokeResults = steps.Select(s => new SpokeResult { Label = s.Label }).ToList();
+            StateHasChanged();
+
+            await Orchestrator.RunAsync(
+                CurrentSection.Heading,
+                CurrentSection.Content,
+                steps,
+                SpokeResults,
+                StateHasChanged,
+                ct);
+
+            _reviewCache[CurrentSection.Id] = (SpokeResults, CurrentSteps);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            IsRunningAiReview = false;
             StateHasChanged();
         }
     }
@@ -675,6 +759,21 @@ public partial class Home : ComponentBase, IAsyncDisposable
         try
         {
             var steps = await ActiveStrategy.ResolveStepsAsync(section.Heading, section.Content, ct);
+            if (steps.Count == 0)
+            {
+                CurrentSteps = Array.Empty<SectionPromptStep>();
+                SpokeResults = new List<SpokeResult>
+                {
+                    new SpokeResult
+                    {
+                        Label = "AI Review",
+                        Status = SpokeStatus.Failed,
+                        Error = $"No AI prompts configured for section '{section.Heading}'."
+                    }
+                };
+                _reviewCache[section.Id] = (SpokeResults, CurrentSteps);
+                return;
+            }
 
             CurrentSteps = steps;
             SpokeResults = steps.Select(s => new SpokeResult { Label = s.Label }).ToList();
@@ -814,6 +913,1308 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private static string NormalizeWhitespace(string value)
     {
         return Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
+    }
+
+    private void GenerateRazorMockScreen()
+    {
+        MockGeneratorError = string.Empty;
+        if (CurrentSection is null)
+        {
+            MockGeneratorError = "Select a section first.";
+            return;
+        }
+
+        var razorCode = ExtractRazorCode(CurrentSection.Content);
+        if (string.IsNullOrWhiteSpace(razorCode))
+        {
+            MockGeneratorError = "No Razor code block found in this section.";
+            GeneratedMockScreen = null;
+            GeneratedMockJson = string.Empty;
+            GeneratedMockHtml = string.Empty;
+            return;
+        }
+
+        var screen = BuildMockScreenModel(razorCode, CurrentSection.Heading);
+        GeneratedMockScreen = screen;
+        GeneratedMockJson = JsonSerializer.Serialize(screen, new JsonSerializerOptions { WriteIndented = true });
+        GeneratedMockHtml = BuildMockScreenHtml(screen);
+    }
+
+    private async Task GenerateRazorMockScreenWithAiAsync()
+    {
+        if (IsGeneratingAiMock)
+        {
+            return;
+        }
+
+        MockGeneratorError = string.Empty;
+        if (CurrentSection is null)
+        {
+            MockGeneratorError = "Select a section first.";
+            return;
+        }
+
+        var razorCode = ExtractRazorCode(CurrentSection.Content);
+        if (string.IsNullOrWhiteSpace(razorCode))
+        {
+            MockGeneratorError = "No Razor code block found in this section.";
+            return;
+        }
+
+        IsGeneratingAiMock = true;
+        StateHasChanged();
+        try
+        {
+            var fastModel = BuildMockScreenModel(razorCode, CurrentSection.Heading);
+            var prompt = BuildAiMockPrompt(fastModel);
+            var json = await OllamaService.GenerateJsonAsync(prompt);
+
+            var aiModel = JsonSerializer.Deserialize<AiMockScreenSpec>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (!IsValidAiSpec(aiModel))
+            {
+                throw new InvalidOperationException("AI mock schema was invalid.");
+            }
+
+            var merged = ToRazorMockScreen(aiModel!);
+            GeneratedMockScreen = merged;
+            GeneratedMockJson = JsonSerializer.Serialize(aiModel, new JsonSerializerOptions { WriteIndented = true });
+            GeneratedMockHtml = BuildMockScreenHtml(merged);
+        }
+        catch (Exception ex)
+        {
+            GenerateRazorMockScreen();
+            MockGeneratorError = $"AI design failed, showing fast mock instead. ({ex.Message})";
+        }
+        finally
+        {
+            IsGeneratingAiMock = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CopyCurrentSectionContentAsync()
+    {
+        if (CurrentSection is null)
+        {
+            return;
+        }
+
+        var text = CurrentSection.Content ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("smartReview.copyTextToClipboard", text);
+        }
+        catch
+        {
+            // Ignore clipboard failures to avoid interrupting review flow.
+        }
+    }
+
+    private async Task CaptureGeneratedMockAsync()
+    {
+        if (GeneratedMockScreen is null || IsCapturingMockPng)
+        {
+            return;
+        }
+
+        IsCapturingMockPng = true;
+        MockGeneratorError = string.Empty;
+        StateHasChanged();
+        try
+        {
+            var safeTitle = Regex.Replace(GeneratedMockScreen.Title ?? "mock-screen", @"[^A-Za-z0-9\-]+", "-").Trim('-');
+            if (string.IsNullOrWhiteSpace(safeTitle))
+            {
+                safeTitle = "mock-screen";
+            }
+
+            var fileName = $"{safeTitle}-{DateTime.Now:yyyyMMdd-HHmmss}.png";
+            await JS.InvokeVoidAsync("smartReview.captureElementAsPng", "srs-generated-mock-render", fileName);
+        }
+        catch (Exception ex)
+        {
+            MockGeneratorError = $"Capture failed: {ex.Message}";
+        }
+        finally
+        {
+            IsCapturingMockPng = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ResetMockGeneratorState()
+    {
+        GeneratedMockScreen = null;
+        GeneratedMockJson = string.Empty;
+        GeneratedMockHtml = string.Empty;
+        MockGeneratorError = string.Empty;
+        ComparisonReportMarkdown = string.Empty;
+        ResetMockAttachmentSelection();
+    }
+
+    private void ResetMockAttachmentSelection()
+    {
+        ShowMockAttachmentPicker = false;
+        AvailableMockAttachments.Clear();
+        SelectedMockAttachmentUrl = null;
+    }
+
+    private async Task GenerateRazorMockComparisonAsync()
+    {
+        if (IsGeneratingComparison || CurrentSection is null || !CurrentSectionIsRazorPage)
+        {
+            return;
+        }
+
+        SyncActiveStoryWithLoadedSections();
+
+        if (ActiveStory is null)
+        {
+            MockGeneratorError = "Load a user story attachment first so mock files can be selected.";
+            return;
+        }
+
+        AvailableMockAttachments = ActiveStory.Attachments
+            .Where(IsMockAttachmentCandidate)
+            .OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (AvailableMockAttachments.Count == 0)
+        {
+            MockGeneratorError = "No mock attachments found for selected user story.";
+            return;
+        }
+
+        MockGeneratorError = string.Empty;
+        ComparisonReportMarkdown = string.Empty;
+        SelectedMockAttachmentUrl = AvailableMockAttachments[0].Url;
+        ShowMockAttachmentPicker = true;
+        StateHasChanged();
+        await Task.Delay(20);
+        await JS.InvokeVoidAsync("smartReview.scrollToElement", "srs-mock-attachment-picker");
+    }
+
+    private void SyncActiveStoryWithLoadedSections()
+    {
+        if (Sections.Count == 0 || DevOpsStories.Count == 0)
+        {
+            return;
+        }
+
+        var ids = Sections
+            .Select(s => ExtractStoryIdFromSourceFile(s.SourceFile))
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+
+        if (ids.Count != 1)
+        {
+            return;
+        }
+
+        var loadedStoryId = ids[0];
+        if (ActiveStory?.Id == loadedStoryId)
+        {
+            return;
+        }
+
+        var matching = DevOpsStories.FirstOrDefault(s => s.Id == loadedStoryId);
+        if (matching is not null)
+        {
+            ActiveStory = matching;
+        }
+    }
+
+    private static int? ExtractStoryIdFromSourceFile(string sourceFile)
+    {
+        if (string.IsNullOrWhiteSpace(sourceFile))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(sourceFile, @"US-(\d+)-", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        return int.TryParse(match.Groups[1].Value, out var id) ? id : null;
+    }
+
+    private void CancelMockAttachmentPicker()
+    {
+        ShowMockAttachmentPicker = false;
+    }
+
+    private async Task ConfirmMockAttachmentComparisonAsync()
+    {
+        if (ActiveStory is null || CurrentSection is null || string.IsNullOrWhiteSpace(SelectedMockAttachmentUrl))
+        {
+            return;
+        }
+
+        if (!CurrentSectionIsRazorPage)
+        {
+            MockGeneratorError = "Current section is not a Razor Page section.";
+            return;
+        }
+
+        var razorCode = ExtractRazorCode(CurrentSection.Content);
+        if (string.IsNullOrWhiteSpace(razorCode))
+        {
+            MockGeneratorError = "No Razor code block found in this section.";
+            return;
+        }
+
+        var selectedAttachment = AvailableMockAttachments.FirstOrDefault(a => string.Equals(a.Url, SelectedMockAttachmentUrl, StringComparison.OrdinalIgnoreCase));
+        if (selectedAttachment is null)
+        {
+            MockGeneratorError = "Select a mock attachment.";
+            return;
+        }
+
+        IsGeneratingComparison = true;
+        ShowMockAttachmentPicker = false;
+        MockGeneratorError = string.Empty;
+        ComparisonReportMarkdown = string.Empty;
+        StartComparisonProgress("Preparing comparison...");
+        StateHasChanged();
+
+        try
+        {
+            UpdateComparisonProgress(28, "Loading selected mock...");
+            var mockupHtml = await AzureDevOpsService.DownloadAttachmentTextAsync(
+                selectedAttachment.Url,
+                DevOpsPatToken.Trim(),
+                CancellationToken.None);
+            UpdateComparisonProgress(58, "Analyzing structures...");
+            var prompt = BuildComparisonPrompt(razorCode, mockupHtml);
+            ComparisonReportMarkdown = await OllamaService.GenerateTextAsync(prompt);
+            UpdateComparisonProgress(88, "Finalizing report...");
+            if (string.IsNullOrWhiteSpace(ComparisonReportMarkdown))
+            {
+                throw new InvalidOperationException("Comparison output was empty.");
+            }
+            UpdateComparisonProgress(100, "Comparison complete.");
+        }
+        catch (Exception ex)
+        {
+            MockGeneratorError = $"Comparison generation failed: {ex.Message}";
+            StopComparisonProgress(reset: true);
+        }
+        finally
+        {
+            IsGeneratingComparison = false;
+            if (string.IsNullOrWhiteSpace(MockGeneratorError))
+            {
+                _ = CompleteAndHideComparisonProgressAsync();
+            }
+            StateHasChanged();
+        }
+    }
+
+    private void StartComparisonProgress(string initialLabel)
+    {
+        StopComparisonProgress(reset: true);
+        ComparisonProgressPercent = 8;
+        ComparisonProgressLabel = initialLabel;
+        _comparisonProgressCts = new CancellationTokenSource();
+        _ = SimulateComparisonProgressAsync(_comparisonProgressCts.Token);
+    }
+
+    private void UpdateComparisonProgress(int percent, string label)
+    {
+        ComparisonProgressPercent = Math.Max(ComparisonProgressPercent, Math.Min(percent, 100));
+        ComparisonProgressLabel = label;
+    }
+
+    private void StopComparisonProgress(bool reset)
+    {
+        _comparisonProgressCts?.Cancel();
+        _comparisonProgressCts?.Dispose();
+        _comparisonProgressCts = null;
+
+        if (reset)
+        {
+            ComparisonProgressPercent = 0;
+            ComparisonProgressLabel = string.Empty;
+            return;
+        }
+
+        ComparisonProgressPercent = 100;
+    }
+
+    private async Task CompleteAndHideComparisonProgressAsync()
+    {
+        StopComparisonProgress(reset: false);
+        await InvokeAsync(StateHasChanged);
+        await Task.Delay(900);
+        if (!IsGeneratingComparison)
+        {
+            StopComparisonProgress(reset: true);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SimulateComparisonProgressAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested && ComparisonProgressPercent < 92)
+            {
+                await Task.Delay(350, ct);
+                ComparisonProgressPercent = Math.Min(92, ComparisonProgressPercent + 3);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private static bool IsMockAttachmentCandidate(DevOpsAttachmentItem attachment)
+    {
+        if (attachment is null)
+        {
+            return false;
+        }
+
+        var ext = attachment.Extension ?? string.Empty;
+        var name = attachment.Name ?? string.Empty;
+        var supportedExt = ext.Equals(".html", StringComparison.OrdinalIgnoreCase)
+                           || ext.Equals(".htm", StringComparison.OrdinalIgnoreCase);
+        if (!supportedExt)
+        {
+            return false;
+        }
+
+        var positiveKeywords = new[] { "mock", "mockup", "wireframe", "screen", "ui" };
+        var negativeKeywords = new[] { "plan", "report", "qa-report", "analysis", "checklist", "notes" };
+
+        var hasPositive = positiveKeywords.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase));
+        if (!hasPositive)
+        {
+            return false;
+        }
+
+        var hasNegative = negativeKeywords.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase));
+        return !hasNegative;
+    }
+
+    private string BuildComparisonPrompt(string razorCode, string mockupHtml)
+    {
+        var template = Configuration["Validation:ComparisonPromptTemplate"];
+        if (string.IsNullOrWhiteSpace(template) ||
+            string.Equals(template, "__USE_DEFAULT_COMPARISON_PROMPT__", StringComparison.OrdinalIgnoreCase))
+        {
+            template = DefaultComparisonPromptTemplate;
+        }
+
+        var resolved = template
+            .Replace("{{RAZOR_CODE}}", razorCode, StringComparison.Ordinal)
+            .Replace("{{MOCKUP_HTML}}", mockupHtml, StringComparison.Ordinal);
+
+        var hasRazorPlaceholder = template.Contains("{{RAZOR_CODE}}", StringComparison.Ordinal);
+        var hasMockupPlaceholder = template.Contains("{{MOCKUP_HTML}}", StringComparison.Ordinal);
+        if (!hasRazorPlaceholder || !hasMockupPlaceholder)
+        {
+            resolved += $"""
+
+Razor file:
+```razor
+{razorCode}
+```
+
+Mockup HTML:
+```html
+{mockupHtml}
+```
+""";
+        }
+
+        return resolved;
+    }
+
+    private bool TryGetComparisonStructurePanels(out string razorStructure, out string mockupStructure)
+    {
+        razorStructure = string.Empty;
+        mockupStructure = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(ComparisonReportMarkdown))
+        {
+            return false;
+        }
+
+        var razorMatch = Regex.Match(
+            ComparisonReportMarkdown,
+            @"##\s*Razor\s*```text\s*(?<body>[\s\S]*?)```",
+            RegexOptions.IgnoreCase);
+
+        var mockupMatch = Regex.Match(
+            ComparisonReportMarkdown,
+            @"##\s*Mockup\s*```text\s*(?<body>[\s\S]*?)```",
+            RegexOptions.IgnoreCase);
+
+        if (!razorMatch.Success || !mockupMatch.Success)
+        {
+            return false;
+        }
+
+        razorStructure = razorMatch.Groups["body"].Value.Trim();
+        mockupStructure = mockupMatch.Groups["body"].Value.Trim();
+        return !string.IsNullOrWhiteSpace(razorStructure) && !string.IsNullOrWhiteSpace(mockupStructure);
+    }
+
+    private const string DefaultComparisonPromptTemplate = """
+You are an expert Razor-to-Mockup UI migration analyzer.
+
+Your task is to compare:
+
+1. Razor component structure
+2. Mockup HTML structure
+
+The MOCKUP is the PRIMARY SOURCE OF TRUTH.
+
+You must generate output in EXACTLY the same format and structure shown below.
+
+==================================================
+CRITICAL PARSING RULE
+=====================
+
+Preserve EXACT physical source order from the Razor file.
+
+DO NOT:
+
+* infer semantic workflow order
+* rearrange controls logically
+* optimize hierarchy
+* reorder based on UX assumptions
+* interpret intended workflow
+
+The generated structure MUST strictly follow:
+
+* exact control order
+* exact nesting order
+* exact column order
+* exact source-code hierarchy
+
+from the Razor source file.
+
+==================================================
+RULES
+=====
+
+1. ONLY compare:
+
+   * controls
+   * control hierarchy
+   * control sequence
+   * field order
+   * field captions
+
+2. IGNORE:
+
+   * styling
+   * CSS
+   * colors
+   * spacing
+   * UX improvements
+   * visual enhancements
+   * app shell differences
+   * responsiveness
+   * typography
+   * animations
+   * visual states
+
+3. Treat MOCKUP as expected/base structure.
+
+4. Show ONLY differences.
+
+5. DO NOT explain business logic.
+
+6. DO NOT generate prose paragraphs.
+
+7. Output MUST remain highly structured.
+
+==================================================
+IMPORTANT SOURCE ORDER RULE
+===========================
+
+The structure diagram MUST reflect EXACT Razor source order.
+
+Example:
+
+If Razor contains:
+
+<MasterGrid />
+<CompanyFilter />
+<ContextIndicator />
+
+Then output MUST be:
+
+Master Grid
+↓
+Company Filter
+↓
+Context Indicator
+
+Even if UX or semantics suggest otherwise.
+
+==================================================
+GROUPING RULE
+=============
+
+If a Razor grid column contains:
+
+GroupIndex="0"
+
+DO NOT display it as a normal sequential field.
+
+Instead represent it as:
+
+⚠ Grouped By: FieldName
+
+Example:
+
+Wrong:
+CostHeadName
+↓
+Checkbox
+
+Correct:
+⚠ Grouped By: CostHeadName
+↓
+Checkbox
+
+==================================================
+HIGHLIGHTING RULES
+==================
+
+Use these markers EXACTLY:
+
+✅ Matching controls = normal text only
+❌ Missing/mismatched controls
+🔄 Sequence mismatch
+➕ Extra controls
+⚠ Different hierarchy/grouping
+
+DO NOT invent new symbols.
+
+==================================================
+OUTPUT FORMAT
+=============
+
+# COMPLETE CONTROL & FIELD SEQUENCE COMPARISON
+
+# OVERALL PAGE STRUCTURE
+
+## Razor
+
+```text
+Header
+↓
+Master Grid
+    ├── Code
+    ├── Name
+    ├── 🔄 InterProject
+    ├── 🔄 VoucherKind
+    ├── TaxesEnabled
+    ├── DoNotBookCommitment
+    └── DoNotShowInCtd
+↓
+❌ Company Filter
+↓
+Context Indicator
+↓
+Tabs
+    ├── Account Links Grid
+    │   ├── IsLinked
+    │   ├── AccountCode
+    │   └── AccountName
+    │
+    └── Cost Code Grid
+        ├── ⚠ Grouped By: CostHeadName
+        ├── 🔄 IsLinked
+        ├── CostCode
+        └── CostCodeName
+```
+
+---
+
+## Mockup
+
+```text
+Header
+↓
+Master Grid
+    ├── Code
+    ├── Name
+    ├── VoucherKind
+    ├── InterProject
+    ├── TaxesEnabled
+    ├── DoNotBookCommitment
+    ├── DoNotShowInCtd
+    └── ➕ Actions
+↓
+Context Indicator
+↓
+Company Filter
+↓
+Tabs
+    ├── Account Links Grid
+    │   ├── Select
+    │   ├── Account Number
+    │   └── Description
+    │
+    └── Cost Code Grid
+        ├── Select
+        ├── Cost Head
+        ├── Cost Code
+        └── Description
+```
+
+---
+
+# COMPLETE DIFFERENCE SUMMARY
+
+| Mockup/Base Expectation                                                              | Current Razor Difference                               | Type                   | Rectification Prompt                                                                                                                           |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Company Filter should appear AFTER Context Indicator and BEFORE Tabs                 | Razor places Company Filter BEFORE Context Indicator   | ⚠ Hierarchy Difference | Move the Company Filter section below Context Indicator and above Tabs to match the mockup structure.                                          |
+| Master Grid field order should be: `Code → Name → VoucherKind → InterProject`        | Razor uses: `Code → Name → InterProject → VoucherKind` | 🔄 Sequence Mismatch   | Reorder the `DxGridDataColumn` definitions inside `XpedeonCrudGrid` so that `VoucherKind` appears before `InterProject`.                       |
+| Master Grid should contain an `Actions` column at the end                            | Razor Master Grid does not contain an Actions column   | ➕ Missing Control      | Add an Actions column at the end of the `XpedeonCrudGrid` with row-level actions matching the mockup structure.                                |
+| Cost Code Grid should display Cost Head as visible column                            | Razor uses `GroupIndex="0"` for CostHeadName           | ⚠ Different Hierarchy  | Remove `GroupIndex="0"` from `CostHeadName` and render it as a visible standard column.                                                        |
+| Cost Code Grid field order should be: `Select → Cost Head → Cost Code → Description` | Razor uses grouped CostHead followed by checkbox       | 🔄 Sequence Mismatch   | Reorder Cost Code Grid columns so the checkbox column appears first, followed by visible `CostHeadName`, then `CostCode`, then `CostCodeName`. |
+| Account Links Grid captions should match mockup                                      | Razor uses technical labels                            | ❌ Label Mismatch       | Rename Account Grid captions to `Select`, `Account Number`, and `Description` while preserving bindings.                                       |
+| Cost Code Grid captions should match mockup                                          | Razor uses technical labels                            | ❌ Label Mismatch       | Rename Cost Code Grid captions to `Select`, `Cost Code`, and `Description` while preserving bindings.                                          |
+| Master Grid caption should display `Type`                                            | Razor uses `VoucherKind` caption                       | ❌ Label Mismatch       | Change the `VoucherKind` column caption to `Type`.                                                                                             |
+
+==================================================
+COMPARISON REQUIREMENTS
+=======================
+
+You MUST compare:
+
+1. Exact top-level layout order
+2. Exact grid order
+3. Exact tab order
+4. Exact child section order
+5. Exact column order
+6. Exact field captions
+7. Missing controls
+8. Extra controls
+9. Grouped vs visible columns
+10. Hierarchy mismatches
+11. Source-order mismatches
+
+==================================================
+FIELD ORDER RULES
+=================
+
+Field order comparison is mandatory.
+
+Example:
+
+Razor:
+Code
+↓
+Name
+↓
+InterProject
+↓
+VoucherKind
+
+Mockup:
+Code
+↓
+Name
+↓
+VoucherKind
+↓
+InterProject
+
+Must generate:
+
+🔄 Sequence Mismatch
+
+==================================================
+LABEL RULES
+===========
+
+If captions differ:
+
+Example:
+IsLinked vs Select
+
+Then generate:
+
+❌ Label Mismatch
+
+==================================================
+RECTIFICATION PROMPT RULES
+==========================
+
+Every mismatch MUST contain:
+
+* precise fix instruction
+* exact control name
+* exact movement/reorder instruction
+* exact expected structure
+
+Do NOT generate vague prompts.
+
+==================================================
+IMPORTANT
+=========
+
+1. Keep output deterministic.
+2. Preserve exact section headings.
+3. Preserve markdown table structure.
+4. Preserve tree indentation.
+5. Do NOT summarize.
+6. Do NOT shorten.
+7. Do NOT add extra commentary.
+8. Output should be production-review quality.
+9. Preserve EXACT Razor source order.
+10. Never infer semantic order over physical order.
+
+Now analyze the supplied Razor file and Mockup HTML and generate the comparison report in EXACTLY this format.
+""";
+
+
+    private static string ExtractRazorCode(string sectionContent)
+    {
+        if (string.IsNullOrWhiteSpace(sectionContent))
+        {
+            return string.Empty;
+        }
+
+        var blockRegex = new Regex(@"```(?<lang>[a-zA-Z0-9_-]+)?\s*\r?\n(?<code>[\s\S]*?)```", RegexOptions.IgnoreCase);
+        var matches = blockRegex.Matches(sectionContent);
+        if (matches.Count > 0)
+        {
+            // Prefer blocks that look like Razor/component markup.
+            foreach (Match m in matches)
+            {
+                var code = m.Groups["code"].Value.Trim();
+                if (LooksLikeRazorMarkup(code))
+                {
+                    return code;
+                }
+            }
+
+            // Fallback to first known markup language block.
+            foreach (Match m in matches)
+            {
+                var lang = (m.Groups["lang"].Value ?? string.Empty).Trim().ToLowerInvariant();
+                if (lang is "razor" or "cshtml" or "html")
+                {
+                    return m.Groups["code"].Value.Trim();
+                }
+            }
+
+            // Do not fallback to arbitrary code blocks like csharp.
+            return string.Empty;
+        }
+
+        return sectionContent.Contains("@page", StringComparison.OrdinalIgnoreCase)
+            ? sectionContent.Trim()
+            : string.Empty;
+    }
+
+    private static bool IsLikelyRazorSection(string heading, string content)
+    {
+        if (!string.IsNullOrWhiteSpace(heading) &&
+            heading.Contains("Razor Page", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return false;
+        }
+
+        return content.Contains("```razor", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("@page", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("<Dx", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("<Xpedeon", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeRazorMarkup(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return false;
+        }
+
+        return code.Contains("@page", StringComparison.OrdinalIgnoreCase)
+            || code.Contains("<Dx", StringComparison.OrdinalIgnoreCase)
+            || code.Contains("<Xpedeon", StringComparison.OrdinalIgnoreCase)
+            || Regex.IsMatch(code, @"<\s*[A-Z][A-Za-z0-9]*", RegexOptions.Compiled);
+    }
+
+    private static RazorMockScreen BuildMockScreenModel(string razorCode, string fallbackTitle)
+    {
+        var title = ExtractTitle(razorCode, fallbackTitle);
+        var breadcrumbs = ExtractBreadcrumbHints(razorCode);
+        var controls = ExtractControls(razorCode);
+        var tabNames = ExtractTabNames(razorCode);
+        var gridColumns = ExtractGridColumns(razorCode);
+
+        return new RazorMockScreen
+        {
+            Title = title,
+            Breadcrumbs = breadcrumbs,
+            Controls = controls,
+            TabNames = tabNames,
+            GridColumns = gridColumns
+        };
+    }
+
+    private static string ExtractTitle(string razorCode, string fallbackTitle)
+    {
+        var titleMatch = Regex.Match(razorCode, "Title\\s*=\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase);
+        if (titleMatch.Success)
+        {
+            return titleMatch.Groups[1].Value.Trim();
+        }
+
+        var pageMatch = Regex.Match(razorCode, "@page\\s+\"([^\"]+)\"", RegexOptions.IgnoreCase);
+        if (pageMatch.Success)
+        {
+            return pageMatch.Groups[1].Value.Trim('/');
+        }
+
+        return string.IsNullOrWhiteSpace(fallbackTitle) ? "Generated screen" : fallbackTitle;
+    }
+
+    private static List<string> ExtractBreadcrumbHints(string razorCode)
+    {
+        var crumbs = new List<string>();
+        foreach (Match match in Regex.Matches(razorCode, "\"([^\"]{2,})\""))
+        {
+            var token = match.Groups[1].Value.Trim();
+            if (token.Length > 40)
+            {
+                continue;
+            }
+
+            if (!Regex.IsMatch(token, "^[A-Za-z][A-Za-z0-9\\s\\-/&]+$"))
+            {
+                continue;
+            }
+
+            if (crumbs.Contains(token, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            crumbs.Add(token);
+            if (crumbs.Count == 4)
+            {
+                break;
+            }
+        }
+
+        return crumbs;
+    }
+
+    private static List<RazorMockControl> ExtractControls(string razorCode)
+    {
+        var controls = new List<RazorMockControl>();
+        var tagRegex = new Regex(@"<(?<name>[A-Za-z][A-Za-z0-9]*)\b(?<attrs>[^>]*)/?>", RegexOptions.Compiled);
+
+        foreach (Match tagMatch in tagRegex.Matches(razorCode))
+        {
+            var name = tagMatch.Groups["name"].Value;
+            if (!IsMockableTag(name))
+            {
+                continue;
+            }
+
+            if (IsNoiseTag(name))
+            {
+                continue;
+            }
+
+            var attrs = tagMatch.Groups["attrs"].Value;
+            var label = ExtractAttributeValue(attrs, "Caption")
+                        ?? ExtractAttributeValue(attrs, "Text")
+                        ?? ExtractAttributeValue(attrs, "Label")
+                        ?? name;
+
+            var controlType = MapControlType(name);
+            controls.Add(new RazorMockControl
+            {
+                Name = name,
+                ControlType = controlType,
+                Label = NormalizeLabel(label)
+            });
+        }
+
+        return controls;
+    }
+
+    private static bool IsMockableTag(string tagName)
+    {
+        if (tagName.StartsWith("Dx", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (tagName.StartsWith("Xpedeon", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return tagName is "SimpleListPageHeader" or "EditForm" or "ValidationSummary";
+    }
+
+    private static bool IsNoiseTag(string tagName)
+    {
+        return tagName.EndsWith("Settings", StringComparison.OrdinalIgnoreCase)
+               || tagName is "DxListEditorColumn"
+               || tagName is "DxModelHost";
+    }
+
+    private static string? ExtractAttributeValue(string attrs, string attrName)
+    {
+        var match = Regex.Match(attrs, $"{attrName}\\s*=\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value.Trim() : null;
+    }
+
+    private static string MapControlType(string tagName)
+    {
+        return tagName switch
+        {
+            "DxTextBox" => "Text Input",
+            "DxComboBox" => "Dropdown",
+            "DxDateEdit" => "Date Picker",
+            "DxCheckBox" => "Checkbox",
+            "DxButton" => "Button",
+            "DxGrid" => "Data Grid",
+            "DxTabs" => "Tabs",
+            "DxTabPage" => "Tab Page",
+            "DxFormLayout" => "Form",
+            "DxMemo" => "Multi-line Input",
+            "SimpleListPageHeader" => "Page Header",
+            _ when tagName.StartsWith("Dx", StringComparison.Ordinal) => "DevExpress Component",
+            _ => "Generic Component"
+        };
+    }
+
+    private static string NormalizeLabel(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "Field";
+        }
+
+        var nameofMatch = Regex.Match(raw, @"nameof\(([^)]+)\)", RegexOptions.IgnoreCase);
+        if (nameofMatch.Success)
+        {
+            var token = nameofMatch.Groups[1].Value.Trim();
+            var lastPart = token.Split('.').LastOrDefault() ?? token;
+            return HumanizeToken(lastPart);
+        }
+
+        if (raw.StartsWith("@", StringComparison.Ordinal))
+        {
+            return "Field";
+        }
+
+        return HumanizeToken(raw);
+    }
+
+    private static string HumanizeToken(string value)
+    {
+        var trimmed = value.Trim().Trim('"');
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return "Field";
+        }
+
+        var withSpaces = Regex.Replace(trimmed, "([a-z])([A-Z])", "$1 $2");
+        withSpaces = withSpaces.Replace("_", " ", StringComparison.Ordinal);
+        return Regex.Replace(withSpaces, @"\s+", " ").Trim();
+    }
+
+    private static List<string> ExtractTabNames(string razorCode)
+    {
+        var names = new List<string>();
+        var tabMatches = Regex.Matches(razorCode, @"<TextTemplate>([\s\S]*?)</TextTemplate>", RegexOptions.IgnoreCase);
+        foreach (Match tab in tabMatches)
+        {
+            var content = tab.Groups[1].Value;
+            var literal = Regex.Match(content, "\"([^\"]+)\"");
+            var raw = literal.Success ? literal.Groups[1].Value : content;
+            var normalized = NormalizeLabel(raw);
+            if (string.IsNullOrWhiteSpace(normalized) || normalized.Equals("Field", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!names.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                names.Add(normalized);
+            }
+        }
+
+        return names;
+    }
+
+    private static List<string> ExtractGridColumns(string razorCode)
+    {
+        var columns = new List<string>();
+        var columnMatches = Regex.Matches(razorCode, @"<DxGridDataColumn\b([\s\S]*?)(/?>)", RegexOptions.IgnoreCase);
+        foreach (Match columnMatch in columnMatches)
+        {
+            var attrs = columnMatch.Groups[1].Value;
+            var fieldName = ExtractAttributeValue(attrs, "FieldName") ?? string.Empty;
+            var label = NormalizeLabel(fieldName);
+            if (label.Equals("Field", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!columns.Contains(label, StringComparer.OrdinalIgnoreCase))
+            {
+                columns.Add(label);
+            }
+        }
+
+        return columns;
+    }
+
+    private static string BuildMockScreenHtml(RazorMockScreen screen)
+    {
+        var fieldControls = screen.Controls
+            .Where(c => c.ControlType is "Text Input" or "Dropdown" or "Date Picker" or "Checkbox" or "Multi-line Input")
+            .ToList();
+        var tabNames = screen.TabNames.Count > 0
+            ? screen.TabNames
+            : screen.Controls.Where(c => c.ControlType == "Tab Page").Select(c => c.Label).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        var hasGrid = screen.GridColumns.Count > 0 || screen.Controls.Any(c => c.ControlType == "Data Grid");
+
+        if (fieldControls.Count == 0)
+        {
+            fieldControls = new List<RazorMockControl>
+            {
+                new() { Name = "XpedeonCompanySelector", ControlType = "Dropdown", Label = "Company" }
+            };
+        }
+
+        var cols = screen.GridColumns.Count > 0 ? screen.GridColumns.Take(6).ToList() : new List<string> { "Code", "Name", "Type" };
+        var tabs = tabNames.Count > 0 ? tabNames : new List<string> { "Account Links", "Cost Code Links" };
+        var title = EscapeHtml(screen.Title.Contains("localizer", StringComparison.OrdinalIgnoreCase) ? "Journal Voucher Types" : screen.Title);
+        var breadcrumb = screen.Breadcrumbs.Count > 0 ? string.Join(" / ", screen.Breadcrumbs.Select(EscapeHtml)) : "Nominal Ledger / Setup";
+
+        var sb = new StringBuilder();
+        sb.Append("""
+<style>
+.tm{background:#e8e4f5;border:1px solid rgba(196,191,224,.55);border-radius:12px;overflow:hidden;font-family:'Barlow',Segoe UI,Arial,sans-serif}
+.tm-head{padding:12px 16px;border-bottom:1px solid rgba(196,191,224,.55);background:#fff}
+.tm-bc{font-size:11px;color:#9489c0}
+.tm-title{font-family:'Barlow Condensed',Segoe UI,sans-serif;font-size:24px;color:#452e82;font-weight:700;margin:2px 0 0}
+.tm-content{padding:14px}
+.tm-card{background:#fff;border:1px solid rgba(196,191,224,.55);border-radius:12px;overflow:hidden;margin-bottom:12px}
+.tm-card-h{padding:10px 14px;background:#faf9fe;border-bottom:1px solid rgba(196,191,224,.5);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#452e82}
+.tm-grid{width:100%;border-collapse:collapse}
+.tm-grid th{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#9489c0;background:#faf9fe;padding:10px 12px;text-align:left;border-bottom:1px solid rgba(196,191,224,.5)}
+.tm-grid td{padding:11px 12px;border-bottom:1px solid rgba(196,191,224,.25)}
+.tm-tabs{display:flex;gap:6px;padding:10px 12px;background:#fff;border-bottom:1px solid rgba(196,191,224,.5)}
+.tm-tab{padding:6px 12px;border-radius:999px;font-size:12px;background:#f3f0fd;color:#5a4e8a;border:1px solid rgba(196,191,224,.7)}
+.tm-tab.active{background:#e2d8ff;color:#452e82;font-weight:700}
+.tm-actions{display:flex;justify-content:flex-end;gap:8px;padding:12px}
+.tm-btn{padding:7px 14px;border-radius:8px;border:1px solid transparent;font-size:12px}
+.tm-btn-save{background:#8c5cff;color:#fff}
+.tm-btn-cancel{background:#fff;color:#5a4e8a;border-color:rgba(196,191,224,.8)}
+.tm-filter{padding:10px 12px;border-bottom:1px solid rgba(196,191,224,.4);display:grid;grid-template-columns:220px 1fr;gap:10px;align-items:center}
+.tm-sel{height:30px;border:1px solid rgba(196,191,224,.8);border-radius:8px;background:#fff}
+</style>
+""");
+        sb.Append("<div class=\"tm\">");
+        sb.Append($"<div class=\"tm-head\"><div class=\"tm-bc\">{breadcrumb}</div><div class=\"tm-title\">{title}</div></div>");
+        sb.Append("<div class=\"tm-content\">");
+        sb.Append("<div class=\"tm-card\">");
+        sb.Append("<div class=\"tm-filter\"><strong>Company</strong><div class=\"tm-sel\"></div></div>");
+        sb.Append("<div class=\"tm-card-h\">Journal Voucher Types</div>");
+        if (hasGrid)
+        {
+            sb.Append("<table class=\"tm-grid\"><thead><tr>");
+            foreach (var c in cols) sb.Append($"<th>{EscapeHtml(c)}</th>");
+            sb.Append("</tr></thead><tbody><tr>");
+            foreach (var _ in cols) sb.Append("<td>...</td>");
+            sb.Append("</tr><tr>");
+            foreach (var _ in cols) sb.Append("<td>...</td>");
+            sb.Append("</tr></tbody></table>");
+        }
+        sb.Append("</div>");
+        sb.Append("<div class=\"tm-card\">");
+        sb.Append("<div class=\"tm-tabs\">");
+        for (var i = 0; i < tabs.Count; i++) sb.Append($"<div class=\"tm-tab {(i == 0 ? "active" : string.Empty)}\">{EscapeHtml(tabs[i])}</div>");
+        sb.Append("</div>");
+        sb.Append("<div class=\"tm-card-h\">Linked Details</div>");
+        sb.Append("<table class=\"tm-grid\"><thead><tr><th>Select</th><th>Code</th><th>Description</th></tr></thead><tbody><tr><td>âœ“</td><td>...</td><td>...</td></tr><tr><td>âœ“</td><td>...</td><td>...</td></tr></tbody></table>");
+        sb.Append("</div>");
+        sb.Append("<div class=\"tm-actions\"><button class=\"tm-btn tm-btn-save\">Save</button><button class=\"tm-btn tm-btn-cancel\">Cancel</button></div>");
+        sb.Append("</div></div>");
+        return sb.ToString();
+    }
+
+    private static string BuildAiMockPrompt(RazorMockScreen fastModel)
+    {
+        var inputJson = JsonSerializer.Serialize(fastModel, new JsonSerializerOptions { WriteIndented = true });
+        return $$"""
+You are a UI designer. Generate a polished mock screen specification from parsed Razor controls.
+Return only valid JSON. No markdown. No explanation.
+
+Required JSON schema:
+{
+  "title": "string",
+  "breadcrumbs": ["string"],
+  "sections": [
+    {
+      "name": "string",
+      "kind": "form|tabs|table|actions",
+      "fields": [
+        { "label": "string", "controlType": "Text Input|Dropdown|Date Picker|Checkbox|Multi-line Input|Button", "placeholder": "string" }
+      ],
+      "tabs": ["string"],
+      "columns": ["string"],
+      "actions": ["string"]
+    }
+  ]
+}
+
+Rules:
+- Keep labels human-friendly and short.
+- Group similar fields under one form section.
+- If controls include grids, add a table section with inferred columns.
+- If controls include tab pages, add tabs section.
+- Add actions section with Save and Cancel if no actions found.
+
+Input model:
+{{inputJson}}
+""";
+    }
+
+    private static bool IsValidAiSpec(AiMockScreenSpec? spec)
+    {
+        return spec is not null
+               && !string.IsNullOrWhiteSpace(spec.Title)
+               && spec.Sections is not null
+               && spec.Sections.Count > 0;
+    }
+
+    private static RazorMockScreen ToRazorMockScreen(AiMockScreenSpec spec)
+    {
+        var controls = new List<RazorMockControl>();
+        var tabNames = new List<string>();
+        var gridColumns = new List<string>();
+        foreach (var section in spec.Sections)
+        {
+            foreach (var field in section.Fields)
+            {
+                controls.Add(new RazorMockControl
+                {
+                    Name = field.ControlType.Replace(" ", string.Empty, StringComparison.Ordinal),
+                    ControlType = field.ControlType,
+                    Label = field.Label
+                });
+            }
+
+            foreach (var action in section.Actions)
+            {
+                controls.Add(new RazorMockControl
+                {
+                    Name = "DxButton",
+                    ControlType = "Button",
+                    Label = action
+                });
+            }
+
+            foreach (var tab in section.Tabs)
+            {
+                tabNames.Add(tab);
+                controls.Add(new RazorMockControl
+                {
+                    Name = "DxTabPage",
+                    ControlType = "Tab Page",
+                    Label = tab
+                });
+            }
+
+            if (section.Kind.Equals("table", StringComparison.OrdinalIgnoreCase))
+            {
+                gridColumns.AddRange(section.Columns);
+                controls.Add(new RazorMockControl
+                {
+                    Name = "DxGrid",
+                    ControlType = "Data Grid",
+                    Label = "Grid"
+                });
+            }
+        }
+
+        return new RazorMockScreen
+        {
+            Title = spec.Title,
+            Breadcrumbs = spec.Breadcrumbs ?? new List<string>(),
+            Controls = controls,
+            TabNames = tabNames.Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            GridColumns = gridColumns.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+        };
+    }
+
+    private sealed class RazorMockScreen
+    {
+        public string Title { get; init; } = string.Empty;
+        public List<string> Breadcrumbs { get; init; } = new();
+        public List<RazorMockControl> Controls { get; init; } = new();
+        public List<string> TabNames { get; init; } = new();
+        public List<string> GridColumns { get; init; } = new();
+    }
+
+    private sealed class RazorMockControl
+    {
+        public string Name { get; init; } = string.Empty;
+        public string ControlType { get; init; } = string.Empty;
+        public string Label { get; init; } = string.Empty;
+    }
+
+    private sealed class AiMockScreenSpec
+    {
+        public string Title { get; init; } = string.Empty;
+        public List<string> Breadcrumbs { get; init; } = new();
+        public List<AiMockSectionSpec> Sections { get; init; } = new();
+    }
+
+    private sealed class AiMockSectionSpec
+    {
+        public string Name { get; init; } = string.Empty;
+        public string Kind { get; init; } = "form";
+        public List<AiMockFieldSpec> Fields { get; init; } = new();
+        public List<string> Tabs { get; init; } = new();
+        public List<string> Columns { get; init; } = new();
+        public List<string> Actions { get; init; } = new();
+    }
+
+    private sealed class AiMockFieldSpec
+    {
+        public string Label { get; init; } = string.Empty;
+        public string ControlType { get; init; } = "Text Input";
+        public string Placeholder { get; init; } = string.Empty;
     }
 
     private void RefreshSourceFilters()
@@ -1306,4 +2707,21 @@ public partial class Home : ComponentBase, IAsyncDisposable
             .Replace("<", "&lt;", StringComparison.Ordinal)
             .Replace(">", "&gt;", StringComparison.Ordinal);
     }
+
+    private static string JsonElementToDisplay(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString() ?? string.Empty,
+            JsonValueKind.Number => element.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            JsonValueKind.Null => "-",
+            JsonValueKind.Undefined => "-",
+            JsonValueKind.Array => element.ToString(),
+            JsonValueKind.Object => element.ToString(),
+            _ => element.ToString()
+        };
+    }
 }
+
