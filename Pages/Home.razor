@@ -80,6 +80,14 @@
                 <button type="button" class="srs-btn srs-btn-primary srs-load-btn" @onclick="LoadStoriesFromDevOpsAsync" disabled="@IsLoadingStories">
                     @(IsLoadingStories ? "Loading..." : "Load user stories")
                 </button>
+                <div class="srs-devops-row" style="margin-top: 10px;">
+                    <button type="button" class="srs-btn srs-btn-primary" @onclick="AnalyzeSelectedDevOpsAttachmentsAsync" disabled="@(SelectedAttachmentCount == 0 || IsLoadingStories)">
+                        Analyze selected (@SelectedAttachmentCount)
+                    </button>
+                    <button type="button" class="srs-btn srs-btn-ghost" @onclick="ClearSelectedAttachments" disabled="@(SelectedAttachmentCount == 0)">
+                        Clear selection
+                    </button>
+                </div>
 
                 @if (DevOpsTotalStories > 0)
                 {
@@ -116,6 +124,7 @@
                                     <th>Assigned To</th>
                                     <th>State</th>
                                     <th>Tags</th>
+                                    <th>Orchestrator Phase</th>
                                     <th>Attached Files</th>
                                 </tr>
                             </thead>
@@ -129,6 +138,16 @@
                                         <td>@story.AssignedTo</td>
                                         <td>@story.State</td>
                                         <td>@(string.IsNullOrWhiteSpace(story.Tags) ? "-" : story.Tags)</td>
+                                        <td>
+                                            @if (string.IsNullOrWhiteSpace(story.OrchestratorPhase))
+                                            {
+                                                <span>-</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="srs-orch-phase-badge">@story.OrchestratorPhase</span>
+                                            }
+                                        </td>
                                         <td>
                                             @if (story.Attachments.Count == 0)
                                             {
@@ -147,16 +166,23 @@
                                                             <summary>type: @typeGroup.Key.ToLowerInvariant() (@typeGroup.Count())</summary>
                                                             @foreach (var attachment in typeGroup)
                                                             {
-                                                                <button type="button" class="srs-attachment-btn" @onclick="() => AnalyzeDevOpsAttachmentAsync(story, attachment)" disabled="@(!attachment.IsSupported)">
-                                                                    <span>@attachment.Name</span>
-                                                                    <span class="srs-attachment-meta">
-                                                                        @attachment.DisplaySize | @attachment.AttachedBy | @attachment.DisplayAttachedOn
-                                                                        @if (attachment.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || attachment.Name.EndsWith(".htm", StringComparison.OrdinalIgnoreCase))
-                                                                        {
-                                                                            <text> | open in browser</text>
-                                                                        }
-                                                                    </span>
-                                                                </button>
+                                                                <div class="srs-attachment-row">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked="@IsAttachmentSelected(story, attachment)"
+                                                                        @onchange="(e) => ToggleAttachmentSelection(story, attachment, e.Value)"
+                                                                        disabled="@(!attachment.IsSupported)" />
+                                                                    <button type="button" class="srs-attachment-btn" @onclick="() => AnalyzeDevOpsAttachmentAsync(story, attachment)" disabled="@(!attachment.IsSupported)">
+                                                                        <span>@attachment.Name</span>
+                                                                        <span class="srs-attachment-meta">
+                                                                            @attachment.DisplaySize | @attachment.AttachedBy | @attachment.DisplayAttachedOn
+                                                                            @if (attachment.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || attachment.Name.EndsWith(".htm", StringComparison.OrdinalIgnoreCase))
+                                                                            {
+                                                                                <text> | open in browser</text>
+                                                                            }
+                                                                        </span>
+                                                                    </button>
+                                                                </div>
                                                             }
                                                         </details>
                                                     }
@@ -208,25 +234,74 @@
 else
 {
     var selectedSection = CurrentSection;
-    var selectedViolations = selectedSection is null
-        ? new List<Violation>()
-        : GetViolationsForSection(selectedSection.Id);
-    var selectedErrorCount = selectedViolations.Count(v => IsSeverity(v.Severity, "error"));
-    var selectedWarningCount = selectedViolations.Count(v => IsSeverity(v.Severity, "warning"));
-    var selectedInfoCount = selectedViolations.Count(v => IsSeverity(v.Severity, "info"));
     var filteredSections = FilteredSections.ToList();
 
     <div class="srs-app">
         <header class="srs-topbar">
             <div class="srs-topbar-left">
+                @if (ActiveStory is not null)
+                {
+                    <a class="srs-story-id-pill"
+                       href="@($"https://dev.azure.com/{DevOpsOrganization}/{DevOpsProject}/_workitems/edit/{ActiveStory.Id}")"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       title="Open user story in Azure DevOps">
+                        #@ActiveStory.Id
+                    </a>
+                    <span class="srs-story-type-pill">@ActiveStory.WorkItemType</span>
+                    <span class="srs-story-title">@ActiveStory.Title</span>
+                    <span class="srs-topbar-divider"></span>
+                }
                 <span class="srs-file-pill">@UploadedFileName</span>
                 <span class="srs-count-pill">@Sections.Count sections</span>
-                <span class="srs-count-pill danger">@TotalIssueCount issues</span>
+                <span class="srs-model-pill @(LastCallUsedFallback ? "srs-model-pill-fallback" : string.Empty)" title="Configured model chain">
+                    Model: @ModelDisplay
+                    @if (!string.IsNullOrWhiteSpace(LastUsedModel))
+                    {
+                        <text> | Active: @LastUsedModel</text>
+                        @if (LastCallUsedFallback)
+                        {
+                            <text> | Fallback active (primary: @PrimaryModel)</text>
+                        }
+                    }
+                </span>
             </div>
             <div class="srs-topbar-actions">
-                <button type="button" class="srs-btn srs-btn-primary" @onclick="OpenRevisionPromptModal" disabled="@(TotalIssueCount == 0)">
-                    Generate Revision Prompt
-                </button>
+                @if (IsFullScanRunning)
+                {
+                    <span class="srs-fullscan-progress">
+                        <span class="srs-ai-spinner srs-ai-spinner--sm"></span>
+                        Scanning @FullScanProgress / @FullScanTotal…
+                    </span>
+                    <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => { CancelActiveReview(); IsFullScanRunning = false; FullScanActiveSectionId = null; }">Cancel scan</button>
+                }
+                else
+                {
+                    @if (IsFullScanEnabled)
+                    {
+                        <button type="button" class="srs-btn srs-btn-scan" @onclick="RunFullScanAsync" disabled="@IsRunningAiReview">
+                            @(_reviewCache.Count > 0 ? "Re-scan All" : "Scan All Sections")
+                        </button>
+                    }
+                    @if (true)
+                    {
+                        @if (IsRunningAiReview)
+                        {
+                            <button type="button" class="srs-btn srs-btn-primary" disabled>
+                                <span class="srs-ai-spinner srs-ai-spinner--sm"></span>
+                                Running…
+                            </button>
+                        }
+                        else if (SpokeResults.Count > 0)
+                        {
+                            <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">Re-run AI Review</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="srs-btn srs-btn-primary" @onclick="RunAiReviewAsync">Run AI Review</button>
+                        }
+                    }
+                }
                 <button type="button" class="srs-btn srs-btn-ghost" @onclick="ResetAll">Close</button>
             </div>
         </header>
@@ -236,7 +311,7 @@ else
                 <div class="srs-sidebar-head">
                     <div>
                         <div class="srs-panel-label">Sections</div>
-                        <div class="srs-sidebar-summary">@CleanSectionCount clean / @Sections.Count total</div>
+                        <div class="srs-sidebar-summary">@Sections.Count total</div>
                     </div>
                 </div>
                 <div class="srs-search-wrap">
@@ -258,12 +333,6 @@ else
                     <button type="button" class="@(SectionFilter == SectionFilterMode.All ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.All)">
                         All
                     </button>
-                    <button type="button" class="@(SectionFilter == SectionFilterMode.Issues ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.Issues)">
-                        Issues
-                    </button>
-                    <button type="button" class="@(SectionFilter == SectionFilterMode.Clean ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.Clean)">
-                        Clean
-                    </button>
                     @if (ShouldShowDefaultReviewRequiredTab)
                     {
                         <button type="button" class="@(SectionFilter == SectionFilterMode.ReviewRequired ? "active" : string.Empty)" @onclick="() => SetSectionFilter(SectionFilterMode.ReviewRequired)">
@@ -279,6 +348,29 @@ else
                         </button>
                     }
                 </div>
+                @if (AvailableSourceFiles.Count > 0)
+                {
+                    <div class="srs-source-tags" role="group" aria-label="Selected source files">
+                        <button type="button" class="srs-source-chip @(string.IsNullOrWhiteSpace(_selectedSourceFile) ? "active" : string.Empty)" @onclick="ShowAllSourceFiles">All files</button>
+                        @foreach (var sourceFile in AvailableSourceFiles)
+                        {
+                            var isActiveSource = string.Equals(_selectedSourceFile, sourceFile, StringComparison.OrdinalIgnoreCase);
+                            <span class="srs-source-chip-wrap @(isActiveSource ? "active" : string.Empty)">
+                                <button type="button" class="srs-source-chip" @onclick="() => SelectSourceFile(sourceFile)">
+                                    @sourceFile
+                                </button>
+                                <button type="button"
+                                        class="srs-source-chip-remove"
+                                        title="Remove file from list"
+                                        aria-label="Remove @sourceFile"
+                                        @onclick="() => RemoveSourceFileFromList(sourceFile)"
+                                        @onclick:stopPropagation="true">
+                                    ×
+                                </button>
+                            </span>
+                        }
+                    </div>
+                }
                 <div class="srs-sections-list">
                     @if (filteredSections.Count == 0)
                     {
@@ -288,17 +380,27 @@ else
                     {
                         @foreach (var sectionItem in filteredSections)
                         {
-                            var status = GetSectionStatus(sectionItem.Id);
                             var isActive = sectionItem.Id == SelectedSectionId;
+                            var isScanning = sectionItem.Id == FullScanActiveSectionId;
+                            var isScanned = !isScanning && _reviewCache.ContainsKey(sectionItem.Id);
+                            var rowClass = isActive ? "active" : isScanning ? "scanning" : isScanned ? "scan-done" : string.Empty;
                             <button type="button"
-                                    class="srs-section-row @(isActive ? "active" : string.Empty)"
+                                    class="srs-section-row @rowClass"
                                     @onclick="() => SelectSection(sectionItem.Id)">
                                 <span class="srs-letter-badge">@sectionItem.Letter</span>
                                 <span class="srs-section-main">
                                     <span class="srs-section-title">@sectionItem.Heading</span>
+                                    <span class="srs-line-meta srs-line-meta-source">@sectionItem.SourceFile</span>
                                     <span class="srs-line-meta">Line @(sectionItem.LineStart)</span>
                                 </span>
-                                <span class="srs-violation-pill @status.CssClass">@status.BadgeText</span>
+                                @if (isScanning)
+                                {
+                                    <span class="srs-scan-indicator srs-scan-indicator--active"></span>
+                                }
+                                else if (isScanned)
+                                {
+                                    <span class="srs-scan-indicator srs-scan-indicator--done">✓</span>
+                                }
                             </button>
                         }
                     }
@@ -313,6 +415,181 @@ else
                 else
                 {
                     <div class="srs-focus-workspace">
+                        <section class="srs-ai-review-pane">
+                            <div class="srs-stage-title">AI Review</div>
+
+                            @if (IsRunningAiReview && SpokeResults.Count == 0)
+                            {
+                                <div class="srs-ai-review-card">
+                                    <div class="srs-ai-empty">
+                                        <span class="srs-ai-spinner srs-ai-spinner--sm"></span>
+                                        <p>@(ActiveRoutingMode == RoutingMode.Dynamic ? "Hub deciding which checks to run…" : "Starting…")</p>
+                                    </div>
+                                </div>
+                            }
+                            else if (SpokeResults.Count > 0)
+                            {
+                                @for (var i = 0; i < SpokeResults.Count; i++)
+                                {
+                                    var result = SpokeResults[i];
+                                    var step = i < CurrentSteps.Count ? CurrentSteps[i] : null;
+                                    var stepLabel = string.IsNullOrWhiteSpace(result.Label) ? $"Check {i + 1}" : result.Label;
+
+                                    <div class="srs-ai-step-card">
+                                        <div class="srs-ai-step-header">
+                                            <span class="srs-ai-step-label">@stepLabel</span>
+                                            @if (result.Status == SpokeStatus.Running)
+                                            {
+                                                <div class="srs-ai-spinner"></div>
+                                            }
+                                            else if (result.Status == SpokeStatus.Done)
+                                            {
+                                                <span class="srs-ai-badge srs-ai-badge--yes">Done</span>
+                                            }
+                                            else if (result.Status == SpokeStatus.Failed)
+                                            {
+                                                <span class="srs-ai-badge srs-ai-badge--no">Failed</span>
+                                            }
+                                        </div>
+
+                                        @if (result.Status == SpokeStatus.Pending)
+                                        {
+                                            <div class="srs-ai-step-thinking srs-ai-step-waiting">Waiting…</div>
+                                        }
+                                        else if (result.Status == SpokeStatus.Running && string.IsNullOrWhiteSpace(result.RawResult))
+                                        {
+                                            <div class="srs-ai-step-thinking">Analysing…</div>
+                                        }
+                                        else if (!string.IsNullOrWhiteSpace(result.Error))
+                                        {
+                                            <div class="srs-ai-error">@result.Error</div>
+                                        }
+                                        else if (result.Parsed is not null && step?.OutputSchema is not null)
+                                        {
+                                            <div class="srs-ai-structured">
+                                                @foreach (var field in step.OutputSchema.Fields)
+                                                {
+                                                    var hasValue = result.Parsed.TryGetValue(field.Key, out var val);
+                                                    var isEmptyList = field.Type == "list" && hasValue &&
+                                                                      val.ValueKind == System.Text.Json.JsonValueKind.Array &&
+                                                                      !val.EnumerateArray().Any();
+                                                    var isMissingNonBoolean = field.Type != "boolean" && !hasValue;
+
+                                                    if (isEmptyList || isMissingNonBoolean) continue;
+
+                                                    <div class="srs-ai-field">
+                                                        <div class="srs-ai-field-label">@field.Label</div>
+                                                        @if (field.Type == "boolean")
+                                                        {
+                                                            var isTrue = hasValue && (val.ValueKind == System.Text.Json.JsonValueKind.True ||
+                                                                         (val.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                                                          val.GetString()?.Equals("true", StringComparison.OrdinalIgnoreCase) == true));
+                                                            <span class="srs-ai-badge @(isTrue ? "srs-ai-badge--yes" : "srs-ai-badge--no")">
+                                                                @(isTrue ? "Yes" : "No")
+                                                            </span>
+                                                        }
+                                                        else if (field.Type == "list")
+                                                        {
+                                                            <ul class="srs-ai-field-list">
+                                                                @if (val.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                                                {
+                                                                    foreach (var item in val.EnumerateArray())
+                                                                    {
+                                                                        <li>@FormatInlineMarkup(JsonElementToDisplay(item))</li>
+                                                                    }
+                                                                }
+                                                                else
+                                                                {
+                                                                    <li>@FormatInlineMarkup(JsonElementToDisplay(val))</li>
+                                                                }
+                                                            </ul>
+                                                        }
+                                                        else if (field.Type == "table")
+                                                        {
+                                                            @if (val.ValueKind == System.Text.Json.JsonValueKind.Array)
+                                                            {
+                                                                var rows = val.EnumerateArray().ToList();
+                                                                var cols = rows.Count > 0
+                                                                    ? rows[0].EnumerateObject().Select(p => p.Name).ToList()
+                                                                    : new List<string>();
+                                                                @if (cols.Count > 0)
+                                                                {
+                                                                    var isPocoComparison = cols.Contains("status") && cols.Contains("rectification_prompt");
+                                                                    var hiddenCompactCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                                                                    {
+                                                                        "in_db", "in_poco", "error_message"
+                                                                    };
+                                                                    var displayCols = isPocoComparison
+                                                                        ? cols.Where(c => !hiddenCompactCols.Contains(c)).ToList()
+                                                                        : cols;
+                                                                    <div class="srs-ai-table-wrap">
+                                                                        <table class="srs-ai-table">
+                                                                            <thead>
+                                                                                <tr>
+                                                                                    @foreach (var col in displayCols)
+                                                                                    {
+                                                                                        <th>@System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(col.Replace("_", " "))</th>
+                                                                                    }
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody>
+                                                                                @foreach (var row in rows)
+                                                                                {
+                                                                                    var rowStatus = row.TryGetProperty("status", out var statusVal)
+                                                                                        ? JsonElementToDisplay(statusVal)
+                                                                                        : string.Empty;
+                                                                                    var rowClass = rowStatus.Equals("MISSING_IN_POCO", StringComparison.OrdinalIgnoreCase)
+                                                                                        ? "srs-ai-row-missing-poco"
+                                                                                        : string.Empty;
+                                                                                    <tr class="@rowClass">
+                                                                                        @foreach (var col in displayCols)
+                                                                                        {
+                                                                                            var cellVal = row.TryGetProperty(col, out var cv) ? JsonElementToDisplay(cv) : "-";
+                                                                                            <td>@((MarkupString)FormatInline(cellVal))</td>
+                                                                                        }
+                                                                                    </tr>
+                                                                                }
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
+                                                                }
+                                                            }
+                                                        }
+                                                        else
+                                                        {
+                                                            <div class="srs-ai-field-text">@JsonElementToDisplay(val)</div>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                        else if (!string.IsNullOrWhiteSpace(result.RawResult))
+                                        {
+                                            <div class="srs-ai-result srs-markdown">@((MarkupString)RenderMarkdown(result.RawResult))</div>
+                                        }
+                                    </div>
+                                }
+                            }
+                            else if (CurrentSectionHasAiSupport)
+                            {
+                                <div class="srs-ai-review-card">
+                                    <div class="srs-ai-empty">
+                                        <div class="srs-ai-empty-icon">AI</div>
+                                        <p>Click <strong>Run AI Review</strong> above to start.</p>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="srs-ai-review-card">
+                                    <div class="srs-ai-empty srs-ai-empty--no-prompt">
+                                        <div class="srs-ai-empty-icon srs-ai-empty-icon--muted">AI</div>
+                                        <p>No AI prompt configured for this section. Switch to <strong>Dynamic</strong> to let the hub decide.</p>
+                                    </div>
+                                </div>
+                            }
+                        </section>
+
                         <section class="srs-details-pane">
                             <section class="srs-stage-card" aria-label="Section details">
                                 <div class="srs-stage-title">Section details</div>
@@ -321,16 +598,9 @@ else
                                         <span class="srs-letter-badge large">@selectedSection.Letter</span>
                                         <div class="srs-focus-title">
                                             <h2>@selectedSection.Heading</h2>
+                                            <div class="srs-source-file-badge">@selectedSection.SourceFile</div>
                                             <div class="srs-center-meta">Line @(selectedSection.LineStart) - @(selectedSection.LineCount) lines</div>
                                         </div>
-                                    </div>
-                                    <div class="srs-section-nav">
-                                        <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => SelectAdjacentIssue(-1)" disabled="@(!HasAdjacentIssue(-1))">
-                                            Previous issue
-                                        </button>
-                                        <button type="button" class="srs-btn srs-btn-ghost" @onclick="() => SelectAdjacentIssue(1)" disabled="@(!HasAdjacentIssue(1))">
-                                            Next issue
-                                        </button>
                                     </div>
                                 </div>
                             </section>
@@ -338,91 +608,138 @@ else
                             <section class="srs-document-card">
                                 <div class="srs-section-label-row">
                                     <span class="srs-panel-label">Section content</span>
-                                    <span>Original markdown</span>
+                                    <div class="srs-section-actions">
+                                        <span>Original markdown</span>
+                                        <button type="button" class="srs-btn srs-btn-ghost" @onclick="CopyCurrentSectionContentAsync">Copy</button>
+                                        @if (CurrentSectionIsRazorPage)
+                                        {
+                                            <button type="button" class="srs-btn srs-btn-primary" @onclick="RunDevExpressPropertyValidationAsync" disabled="@IsRunningAiReview">
+                                                Validate DevExpress Properties
+                                            </button>
+                                            <button type="button" class="srs-btn srs-btn-ghost" @onclick="GenerateRazorMockScreen">Generate Mock (Fast)</button>
+                                            <button type="button" class="srs-btn srs-btn-primary" @onclick="GenerateRazorMockScreenWithAiAsync" disabled="@IsGeneratingAiMock">
+                                                @(IsGeneratingAiMock ? "Generating AI Design..." : "Generate Mock (AI Design)")
+                                            </button>
+                                            <button type="button" class="srs-btn srs-btn-ghost" @onclick="GenerateRazorMockComparisonAsync" disabled="@IsGeneratingComparison">
+                                                @(IsGeneratingComparison ? "Generating Comparison..." : "Generate Comparison")
+                                            </button>
+                                        }
+                                    </div>
                                 </div>
                                 <div class="srs-markdown">
                                     @((MarkupString)RenderMarkdown(selectedSection.Content, ActiveHighlightTerms))
                                 </div>
-                            </section>
-                        </section>
-
-                        <section class="srs-checklist-pane">
-                            <section class="srs-stage-card" aria-label="Checklist">
-                                <div class="srs-stage-title">Check list</div>
-                                <section class="srs-conclusion-card @(selectedViolations.Count == 0 ? "clean" : "needs-work")">
-                                    <div>
-                                        <div class="srs-conclusion-kicker">Conclusion</div>
-                                        <h3>@GetSectionConclusion(selectedViolations)</h3>
-                                        <p>@GetSectionAction(selectedViolations)</p>
-                                    </div>
-                                    <div class="srs-conclusion-stats">
-                                        <span>@selectedErrorCount errors</span>
-                                        <span>@selectedWarningCount warnings</span>
-                                        <span>@selectedInfoCount info</span>
-                                    </div>
-                                </section>
-                                @if (selectedViolations.Count > 0)
+                                @if (IsGeneratingComparison || ComparisonProgressPercent > 0)
                                 {
-                                    <section class="srs-fix-list" aria-label="Fix checklist">
-                                        <div class="srs-section-label-row">
-                                            <span class="srs-panel-label">Fix checklist</span>
-                                            <span>@selectedViolations.Count item@(selectedViolations.Count == 1 ? string.Empty : "s")</span>
+                                    <div class="srs-compare-progress">
+                                        <div class="srs-compare-progress-head">
+                                            <span>@(string.IsNullOrWhiteSpace(ComparisonProgressLabel) ? "Generating comparison..." : ComparisonProgressLabel)</span>
+                                            <span>@ComparisonProgressPercent%</span>
                                         </div>
-                                        @for (var i = 0; i < selectedViolations.Count; i++)
-                                        {
-                                            var violation = selectedViolations[i];
-                                            var reasonKey = BuildReasonKey(selectedSection.Id, violation, i);
-                                            var reasonExpanded = ExpandedReasonKeys.Contains(reasonKey);
-                                            <article class="srs-fix-item @GetSeverityClass(violation.Severity)">
-                                                <div class="srs-fix-heading">
-                                                    <span class="srs-rule-id @GetSeverityClass(violation.Severity)">@violation.RuleId</span>
-                                                    <span>@violation.Title</span>
-                                                </div>
-                                                <div class="srs-fix-text">@violation.Fix</div>
-                                                <button type="button"
-                                                        class="srs-btn srs-btn-ghost srs-reason-toggle"
-                                                        @onclick="() => ToggleReason(reasonKey)">
-                                                    @(reasonExpanded ? "Hide evidence" : "Show evidence")
-                                                </button>
-                                                @if (reasonExpanded)
-                                                {
-                                                    <div class="srs-reason-box">
-                                                        <div class="srs-detail-label">Matched</div>
-                                                        <div class="srs-matched-text">@TruncateForDisplay(violation.Matched, 120)</div>
-                                                        <div class="srs-detail-label">Reason</div>
-                                                        <div>@violation.Reason</div>
-                                                    </div>
-                                                }
-                                            </article>
-                                        }
-                                    </section>
+                                        <div class="srs-compare-progress-track">
+                                            <div class="srs-compare-progress-fill" style="width:@($"{ComparisonProgressPercent}%")"></div>
+                                        </div>
+                                    </div>
                                 }
                             </section>
+
+                            <section class="srs-document-card">
+                                <div class="srs-section-label-row">
+                                    <span class="srs-panel-label">Generated mock</span>
+                                    <div class="srs-section-actions">
+                                        <span>Razor parser preview</span>
+                                        <button type="button" class="srs-btn srs-btn-ghost" @onclick="CaptureGeneratedMockAsync" disabled="@(GeneratedMockScreen is null || IsCapturingMockPng)">
+                                            @(IsCapturingMockPng ? "Capturing..." : "Capture PNG")
+                                        </button>
+                                    </div>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(MockGeneratorError))
+                                {
+                                    <div class="srs-mock-empty">@MockGeneratorError</div>
+                                }
+                                else if (GeneratedMockScreen is null)
+                                {
+                                    <div class="srs-mock-empty">Click "Generate Mock (AI Design)" to build a design-oriented mock from Razor code.</div>
+                                }
+                                else
+                                {
+                                    <div class="srs-mock-preview">
+                                        <div class="srs-mock-render" id="srs-generated-mock-render">
+                                            @((MarkupString)GeneratedMockHtml)
+                                        </div>
+                                        <div class="srs-mock-json-wrap">
+                                            <pre class="srs-mock-json"><code>@GeneratedMockJson</code></pre>
+                                        </div>
+                                    </div>
+                                }
+                            </section>
+
+                            @if (!string.IsNullOrWhiteSpace(ComparisonReportMarkdown))
+                            {
+                                <section class="srs-document-card">
+                                    <div class="srs-section-label-row">
+                                        <span class="srs-panel-label">Razor vs Mockup Comparison</span>
+                                        <span>Deterministic comparison report</span>
+                                    </div>
+                                    @if (TryGetComparisonStructurePanels(out var razorStructure, out var mockupStructure))
+                                    {
+                                        <div class="srs-compare-vertical">
+                                            <article class="srs-compare-panel">
+                                                <h4>Razor</h4>
+                                                <pre><code>@razorStructure</code></pre>
+                                            </article>
+                                            <article class="srs-compare-panel">
+                                                <h4>Mockup</h4>
+                                                <pre><code>@mockupStructure</code></pre>
+                                            </article>
+                                        </div>
+                                    }
+                                    <div class="srs-markdown">
+                                        @((MarkupString)RenderMarkdown(ComparisonReportMarkdown))
+                                    </div>
+                                </section>
+                            }
+
+                            @if (ShowMockAttachmentPicker)
+                            {
+                                <section class="srs-document-card" id="srs-mock-attachment-picker">
+                                    <div class="srs-section-label-row">
+                                        <span class="srs-panel-label">Select Mock Attachment</span>
+                                        <span>Story #@ActiveStory?.Id</span>
+                                    </div>
+                                    <div class="srs-mock-picker">
+                                        @foreach (var attachment in AvailableMockAttachments)
+                                        {
+                                            var optionId = $"mock-{attachment.Url.GetHashCode()}";
+                                            <label class="srs-mock-option" for="@optionId">
+                                                <input id="@optionId"
+                                                       type="radio"
+                                                       name="mockAttachment"
+                                                       checked="@string.Equals(SelectedMockAttachmentUrl, attachment.Url, StringComparison.OrdinalIgnoreCase)"
+                                                       @onchange="@(() => SelectedMockAttachmentUrl = attachment.Url)" />
+                                                <span class="srs-mock-option-text">
+                                                    <strong>@attachment.Name</strong>
+                                                    <span class="srs-line-meta">@attachment.DisplaySize | @attachment.AttachedBy | @attachment.DisplayAttachedOn</span>
+                                                </span>
+                                            </label>
+                                        }
+                                        <div class="srs-mock-picker-actions">
+                                            <button type="button" class="srs-btn srs-btn-primary" @onclick="ConfirmMockAttachmentComparisonAsync" disabled="@IsGeneratingComparison">
+                                                @(IsGeneratingComparison ? "Generating Comparison..." : "Compare with Selected Mock")
+                                            </button>
+                                            <button type="button" class="srs-btn srs-btn-ghost" @onclick="CancelMockAttachmentPicker">Cancel</button>
+                                        </div>
+                                    </div>
+                                </section>
+                            }
                         </section>
-                    </div>
+
+                        </div>
                 }
             </main>
         </div>
     </div>
 }
 
-@if (ShowRevisionModal)
-{
-    <div class="srs-modal-overlay" @onclick="CloseRevisionPromptModal">
-        <div class="srs-modal-card" @onclick:stopPropagation="true">
-            <div class="srs-modal-header">
-                <h3>Revision Prompt</h3>
-                <button type="button" class="srs-btn srs-btn-ghost" @onclick="CloseRevisionPromptModal">Close</button>
-            </div>
-            <div class="srs-modal-body">
-                <pre>@RevisionPromptText</pre>
-            </div>
-            <div class="srs-modal-footer">
-                <button type="button" class="srs-btn srs-btn-primary" @onclick="CopyRevisionPromptAsync">@CopyButtonLabel</button>
-                <button type="button" class="srs-btn srs-btn-ghost" @onclick="CloseRevisionPromptModal">Close</button>
-            </div>
-        </div>
-    </div>
-}
 
 

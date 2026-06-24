@@ -1,31 +1,42 @@
-using System.Text;
+﻿using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.JSInterop;
 using Microsoft.Extensions.Configuration;
+using SmartReviewSystem.Models.Agents;
+using SmartReviewSystem.Models.Ai;
 using SmartReviewSystem.Models.DevOps;
 using SmartReviewSystem.Models.Ui;
 using SmartReviewSystem.Services.DevOps;
+using SmartReviewSystem.Services.Ollama;
+using SmartReviewSystem.Services.Orchestration;
 
 namespace SmartReviewSystem.Pages;
 
-public partial class Home : ComponentBase
+public partial class Home : ComponentBase, IAsyncDisposable
 {
     [Inject]
     private IJSRuntime JS { get; set; } = default!;
     [Inject]
+    private HttpClient Http { get; set; } = default!;
+    [Inject]
     private IAzureDevOpsService AzureDevOpsService { get; set; } = default!;
     [Inject]
+    private IOllamaService OllamaService { get; set; } = default!;
+    [Inject]
     private IConfiguration Configuration { get; set; } = default!;
-
-    private readonly IReadOnlyList<string> SeverityOrder = new[] { "error", "warning", "info" };
+    [Inject]
+    private ConfigRoutingStrategy ConfigStrategy { get; set; } = default!;
+    [Inject]
+    private LlmRoutingStrategy LlmStrategy { get; set; } = default!;
+    [Inject]
+    private ReviewOrchestrator Orchestrator { get; set; } = default!;
 
     private enum SectionFilterMode
     {
         All,
-        Issues,
-        Clean,
         ReviewRequired,
         CustomPattern
     }
@@ -38,18 +49,9 @@ public partial class Home : ComponentBase
         AzureDevOps
     }
 
-    // ============================================================
-    // SECTION 1: ANTIPATTERN RULEBOOK
-    // ============================================================
-    private readonly IReadOnlyList<AntipatternRule> Rulebook = CreateRulebook();
-
-    // ============================================================
-    // SECTION 2: MARKDOWN PARSER (regex-based renderer)
-    // ============================================================
     private readonly List<SectionModel> Sections = new();
-    private readonly HashSet<string> ExpandedReasonKeys = new(StringComparer.OrdinalIgnoreCase);
-    private Dictionary<string, List<Violation>> ViolationsBySection = new(StringComparer.OrdinalIgnoreCase);
     private string? UploadedFileName;
+    private DevOpsStoryItem? ActiveStory;
     private string UploadError = string.Empty;
     private string? SelectedSectionId;
     private string SectionSearchText = string.Empty;
@@ -57,10 +59,17 @@ public partial class Home : ComponentBase
     private readonly List<ConfiguredSectionTab> ConfiguredSectionTabs = new();
     private string? ActiveCustomTabName;
     private bool IsDragging;
-    private bool IsViolationsPanelCollapsed;
-    private bool ShowRevisionModal;
-    private string RevisionPromptText = string.Empty;
-    private string CopyButtonLabel = "Copy to Clipboard";
+    private bool IsRunningAiReview;
+    private bool IsFullScanEnabled;
+    private bool IsFullScanRunning;
+    private string? FullScanActiveSectionId;
+    private int FullScanProgress;
+    private int FullScanTotal;
+    private RoutingMode ActiveRoutingMode;
+    private IReadOnlyList<SectionPromptStep> CurrentSteps = Array.Empty<SectionPromptStep>();
+    private List<SpokeResult> SpokeResults = new();
+    private CancellationTokenSource? _reviewCts;
+    private readonly Dictionary<string, (List<SpokeResult> Results, IReadOnlyList<SectionPromptStep> Steps)> _reviewCache = new();
     private UploadSource CurrentUploadSource = UploadSource.AzureDevOps;
     private string DevOpsOrganization = string.Empty;
     private string DevOpsProject = string.Empty;
@@ -68,7 +77,7 @@ public partial class Home : ComponentBase
     private string DevOpsCondition = "[System.WorkItemType] = 'User Story' AND [System.State] <> 'Closed'";
     private string DevOpsBuiltQuery = string.Empty;
     private bool UseAdvancedWiql;
-    private string DevOpsTagFilter = "Master AI Development";
+    private string DevOpsTagFilter = "AI development with revised orchestration"; //"Master AI Development";
     private string DevOpsStateFilter = "Any";
     private string DevOpsAssignedFilter = string.Empty;
     private bool DevOpsOnlyWithAttachments = true;
@@ -83,9 +92,33 @@ public partial class Home : ComponentBase
     private string DevOpsUnsupportedExtensionSummary = string.Empty;
     private string DevOpsConnectionStatus = "Idle";
     private bool IsDevOpsFiltersCollapsed = true;
+    private readonly Dictionary<string, (DevOpsStoryItem Story, DevOpsAttachmentItem Attachment)> _selectedDevOpsAttachments = new(StringComparer.OrdinalIgnoreCase);
+    private int SelectedAttachmentCount => _selectedDevOpsAttachments.Count;
+    private string? _selectedSourceFile;
+    private RazorMockScreen? GeneratedMockScreen;
+    private string GeneratedMockJson = string.Empty;
+    private string GeneratedMockHtml = string.Empty;
+    private string MockGeneratorError = string.Empty;
+    private bool IsGeneratingAiMock;
+    private bool IsCapturingMockPng;
+    private bool IsGeneratingComparison;
+    private string ComparisonReportMarkdown = string.Empty;
+    private int ComparisonProgressPercent;
+    private string ComparisonProgressLabel = string.Empty;
+    private CancellationTokenSource? _comparisonProgressCts;
+    private bool ShowMockAttachmentPicker;
+    private List<DevOpsAttachmentItem> AvailableMockAttachments = new();
+    private string? SelectedMockAttachmentUrl;
 
     protected override void OnInitialized()
     {
+        var routingModeValue = Configuration["Validation:Controls:RoutingMode"] ?? "Static";
+        ActiveRoutingMode = Enum.TryParse<RoutingMode>(routingModeValue, ignoreCase: true, out var parsed)
+            ? parsed
+            : RoutingMode.Static;
+
+        IsFullScanEnabled = Configuration.GetValue<bool>("Validation:Controls:FullScan", false);
+
         var options = Configuration.GetSection("DevOps").Get<DevOpsOptions>() ?? new DevOpsOptions();
         DevOpsOrganization = options.Organization;
         DevOpsProject = options.Project;
@@ -131,10 +164,21 @@ public partial class Home : ComponentBase
             ? "Azure DevOps source"
             : "Local upload source";
     private SectionModel? CurrentSection => Sections.FirstOrDefault(s => s.Id == SelectedSectionId);
-    private int TotalIssueCount => ViolationsBySection.Values.Sum(violations => violations.Count);
-    private int CleanSectionCount => Sections.Count(section => GetViolationsForSection(section.Id).Count == 0);
-    private IEnumerable<SectionModel> IssueSections => Sections.Where(section => GetViolationsForSection(section.Id).Count > 0);
+    private bool CurrentSectionIsRazorPage =>
+        CurrentSection is not null && IsLikelyRazorSection(CurrentSection.Heading, CurrentSection.Content);
 
+    private IRoutingStrategy ActiveStrategy =>
+        ActiveRoutingMode == RoutingMode.Static ? ConfigStrategy : LlmStrategy;
+
+    private bool CurrentSectionHasAiSupport =>
+        CurrentSection is not null && (
+            ActiveRoutingMode == RoutingMode.Dynamic ||
+            OllamaService.HasSectionPrompt(CurrentSection.Heading)
+        );
+    private string ModelDisplay => OllamaService.GetConfiguredModelsDisplay();
+    private string PrimaryModel => OllamaService.GetPrimaryModel();
+    private string? LastUsedModel => OllamaService.GetLastUsedModel();
+    private bool LastCallUsedFallback => OllamaService.WasLastCallFallbackUsed();
     private IEnumerable<SectionModel> FilteredSections
     {
         get
@@ -142,8 +186,6 @@ public partial class Home : ComponentBase
             var query = SectionSearchText.Trim();
             IEnumerable<SectionModel> sections = SectionFilter switch
             {
-                SectionFilterMode.Issues => Sections.Where(section => GetViolationsForSection(section.Id).Count > 0),
-                SectionFilterMode.Clean => Sections.Where(section => GetViolationsForSection(section.Id).Count == 0),
                 SectionFilterMode.ReviewRequired => Sections.Where(section =>
                     section.Heading.Contains("review", StringComparison.OrdinalIgnoreCase) ||
                     section.Content.Contains("review", StringComparison.OrdinalIgnoreCase)),
@@ -156,6 +198,11 @@ public partial class Home : ComponentBase
                 sections = sections.Where(section =>
                     section.Heading.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                     section.Content.Contains(query, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(_selectedSourceFile))
+            {
+                sections = sections.Where(section => string.Equals(section.SourceFile, _selectedSourceFile, StringComparison.OrdinalIgnoreCase));
             }
 
             return sections;
@@ -236,6 +283,7 @@ public partial class Home : ComponentBase
             using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
             using var reader = new StreamReader(stream);
             var content = await reader.ReadToEndAsync();
+            ActiveStory = null;
             ProcessUploadedContent(file.Name, content);
         }
         catch (Exception ex)
@@ -248,6 +296,7 @@ public partial class Home : ComponentBase
     {
         DevOpsError = string.Empty;
         UploadError = string.Empty;
+        _selectedDevOpsAttachments.Clear();
         DevOpsStories = new List<DevOpsStoryItem>();
         DevOpsTotalStories = 0;
         DevOpsStoriesWithAttachments = 0;
@@ -341,11 +390,96 @@ public partial class Home : ComponentBase
 
             var content = await AzureDevOpsService.DownloadAttachmentTextAsync(attachment.Url, DevOpsPatToken.Trim(), CancellationToken.None);
             var fileName = $"US-{story.Id}-{attachment.Name}";
+            ActiveStory = story;
             ProcessUploadedContent(fileName, content);
         }
         catch (Exception ex)
         {
             DevOpsError = $"Failed to analyze attachment '{attachment.Name}': {ex.Message}";
+        }
+    }
+
+    private IReadOnlyList<string> AvailableSourceFiles => Sections
+        .Select(s => s.SourceFile)
+        .Where(s => !string.IsNullOrWhiteSpace(s))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private static string BuildAttachmentSelectionKey(DevOpsStoryItem story, DevOpsAttachmentItem attachment)
+    {
+        return $"{story.Id}|{attachment.Url}";
+    }
+
+    private bool IsAttachmentSelected(DevOpsStoryItem story, DevOpsAttachmentItem attachment)
+    {
+        return _selectedDevOpsAttachments.ContainsKey(BuildAttachmentSelectionKey(story, attachment));
+    }
+
+    private void ToggleAttachmentSelection(DevOpsStoryItem story, DevOpsAttachmentItem attachment, object? value)
+    {
+        if (!attachment.IsSupported)
+        {
+            return;
+        }
+
+        var key = BuildAttachmentSelectionKey(story, attachment);
+        var isChecked = value as bool? == true;
+        if (isChecked)
+        {
+            _selectedDevOpsAttachments[key] = (story, attachment);
+        }
+        else
+        {
+            _selectedDevOpsAttachments.Remove(key);
+        }
+    }
+
+    private void ClearSelectedAttachments()
+    {
+        _selectedDevOpsAttachments.Clear();
+    }
+
+    private async Task AnalyzeSelectedDevOpsAttachmentsAsync()
+    {
+        UploadError = string.Empty;
+        DevOpsError = string.Empty;
+
+        var selected = _selectedDevOpsAttachments.Values
+            .Where(s => s.Attachment.IsSupported)
+            .OrderBy(s => s.Story.Id)
+            .ThenBy(s => s.Attachment.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (selected.Count == 0)
+        {
+            DevOpsError = "Select one or more supported text attachments first.";
+            return;
+        }
+
+        try
+        {
+            var mergedSections = new List<SectionModel>();
+            DevOpsStoryItem? firstStory = null;
+
+            foreach (var (story, attachment) in selected)
+            {
+                var content = await AzureDevOpsService.DownloadAttachmentTextAsync(attachment.Url, DevOpsPatToken.Trim(), CancellationToken.None);
+                firstStory ??= story;
+                var sourceFile = $"US-{story.Id}-{attachment.Name}";
+                mergedSections.AddRange(ParseSections(content, sourceFile));
+            }
+
+            ActiveStory = firstStory;
+            var fileLabel = selected.Count == 1
+                ? $"US-{selected[0].Story.Id}-{selected[0].Attachment.Name}"
+                : $"US-batch-{selected.Count}-attachments.md";
+            LoadSections(fileLabel, mergedSections);
+            _selectedDevOpsAttachments.Clear();
+        }
+        catch (Exception ex)
+        {
+            DevOpsError = $"Failed to analyze selected attachments: {ex.Message}";
         }
     }
 
@@ -395,19 +529,29 @@ public partial class Home : ComponentBase
 
     private void ProcessUploadedContent(string fileName, string content)
     {
+        LoadSections(fileName, ParseSections(content, fileName));
+    }
+
+    private void LoadSections(string fileName, List<SectionModel> parsedSections)
+    {
         UploadedFileName = fileName;
         ActiveCustomTabName = null;
         Sections.Clear();
-        Sections.AddRange(ParseSections(content));
+        Sections.AddRange(parsedSections.Select((section, index) => new SectionModel
+        {
+            Id = $"section-{index + 1}",
+            Letter = section.Letter,
+            Heading = section.Heading,
+            LineStart = section.LineStart,
+            LineCount = section.LineCount,
+            Content = section.Content,
+            SourceFile = section.SourceFile
+        }));
         SelectedSectionId = Sections.FirstOrDefault()?.Id;
-        var activeProfiles = DetectActiveRuleProfiles(content, fileName);
-        ViolationsBySection = RunAllRules(Sections, Rulebook, activeProfiles);
-        ExpandedReasonKeys.Clear();
         SectionSearchText = string.Empty;
         SectionFilter = SectionFilterMode.All;
-        IsViolationsPanelCollapsed = false;
-        ShowRevisionModal = false;
-        CopyButtonLabel = "Copy to Clipboard";
+        RefreshSourceFilters();
+        ResetMockAttachmentSelection();
 
         if (Sections.Count == 0)
         {
@@ -418,18 +562,13 @@ public partial class Home : ComponentBase
     private void ResetAll()
     {
         UploadedFileName = null;
+        ActiveStory = null;
         UploadError = string.Empty;
         SelectedSectionId = null;
         Sections.Clear();
-        ViolationsBySection = new Dictionary<string, List<Violation>>(StringComparer.OrdinalIgnoreCase);
-        ExpandedReasonKeys.Clear();
         SectionSearchText = string.Empty;
         SectionFilter = SectionFilterMode.All;
         ActiveCustomTabName = null;
-        IsViolationsPanelCollapsed = false;
-        ShowRevisionModal = false;
-        RevisionPromptText = string.Empty;
-        CopyButtonLabel = "Copy to Clipboard";
         DevOpsError = string.Empty;
         DevOpsTotalStories = 0;
         DevOpsStoriesWithAttachments = 0;
@@ -438,11 +577,250 @@ public partial class Home : ComponentBase
         DevOpsUnsupportedExtensionSummary = string.Empty;
         DevOpsConnectionStatus = "Idle";
         DevOpsBuiltQuery = string.Empty;
+        _selectedDevOpsAttachments.Clear();
+        _selectedSourceFile = null;
+        SpokeResults = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        IsRunningAiReview = false;
+        IsFullScanRunning = false;
+        FullScanActiveSectionId = null;
+        FullScanProgress = 0;
+        FullScanTotal = 0;
+        _reviewCache.Clear();
+        CancelActiveReview();
+        ResetMockGeneratorState();
     }
 
     private void SelectSection(string sectionId)
     {
+        if (SelectedSectionId == sectionId && !IsFullScanRunning)
+            return;
+
+        CancelActiveReview();
+
+        if (IsFullScanRunning)
+        {
+            IsFullScanRunning = false;
+            FullScanActiveSectionId = null;
+        }
+
         SelectedSectionId = sectionId;
+        IsRunningAiReview = false;
+        ResetMockGeneratorState();
+
+        if (_reviewCache.TryGetValue(sectionId, out var cached))
+        {
+            SpokeResults = cached.Results;
+            CurrentSteps = cached.Steps;
+        }
+        else
+        {
+            SpokeResults = new();
+            CurrentSteps = Array.Empty<SectionPromptStep>();
+        }
+    }
+
+    private async Task RunAiReviewAsync()
+    {
+        if (CurrentSection is null || IsRunningAiReview || IsFullScanRunning)
+            return;
+
+        CancelActiveReview();
+        _reviewCts = new CancellationTokenSource();
+        var ct = _reviewCts.Token;
+
+        SpokeResults = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        StateHasChanged();
+
+        try
+        {
+            await RunAiReviewCoreAsync(CurrentSection, ct);
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunDevExpressPropertyValidationAsync()
+    {
+        if (CurrentSection is null || IsRunningAiReview || IsFullScanRunning || !CurrentSectionIsRazorPage)
+            return;
+
+        CancelActiveReview();
+        _reviewCts = new CancellationTokenSource();
+        var ct = _reviewCts.Token;
+
+        IsRunningAiReview = true;
+        SpokeResults = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        StateHasChanged();
+
+        try
+        {
+            var steps = OllamaService
+                .GetPromptSteps(CurrentSection.Heading)
+                .Where(s => s.Label.Equals("DevExpress Control Property Validation", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (steps.Count == 0)
+            {
+                SpokeResults = new List<SpokeResult>
+                {
+                    new SpokeResult
+                    {
+                        Label = "DevExpress Control Property Validation",
+                        Status = SpokeStatus.Failed,
+                        Error = "Validation step is not configured under Razor Page prompts."
+                    }
+                };
+                return;
+            }
+
+            CurrentSteps = steps;
+            SpokeResults = steps.Select(s => new SpokeResult { Label = s.Label }).ToList();
+            StateHasChanged();
+
+            await Orchestrator.RunAsync(
+                CurrentSection.Heading,
+                CurrentSection.Content,
+                steps,
+                SpokeResults,
+                StateHasChanged,
+                ct);
+
+            _reviewCache[CurrentSection.Id] = (SpokeResults, CurrentSteps);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            IsRunningAiReview = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunFullScanAsync()
+    {
+        if (IsFullScanRunning || IsRunningAiReview || Sections.Count == 0)
+            return;
+
+        CancelActiveReview();
+        _reviewCts = new CancellationTokenSource();
+        var ct = _reviewCts.Token;
+
+        IsFullScanRunning = true;
+        FullScanProgress = 0;
+        FullScanTotal = Sections.Count;
+        StateHasChanged();
+
+        try
+        {
+            foreach (var section in Sections)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                FullScanActiveSectionId = section.Id;
+                SelectedSectionId = section.Id;
+                SpokeResults = _reviewCache.TryGetValue(section.Id, out var cached)
+                    ? cached.Results
+                    : new List<SpokeResult>();
+                CurrentSteps = _reviewCache.TryGetValue(section.Id, out var cachedSteps)
+                    ? cachedSteps.Steps
+                    : Array.Empty<SectionPromptStep>();
+                StateHasChanged();
+
+                await RunAiReviewCoreAsync(section, ct);
+
+                FullScanProgress++;
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        finally
+        {
+            IsFullScanRunning = false;
+            FullScanActiveSectionId = null;
+            IsRunningAiReview = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunAiReviewCoreAsync(SectionModel section, CancellationToken ct)
+    {
+        IsRunningAiReview = true;
+        SpokeResults = new();
+        CurrentSteps = Array.Empty<SectionPromptStep>();
+        StateHasChanged();
+
+        try
+        {
+            var steps = await ActiveStrategy.ResolveStepsAsync(section.Heading, section.Content, ct);
+            if (steps.Count == 0)
+            {
+                CurrentSteps = Array.Empty<SectionPromptStep>();
+                SpokeResults = new List<SpokeResult>
+                {
+                    new SpokeResult
+                    {
+                        Label = "AI Review",
+                        Status = SpokeStatus.Failed,
+                        Error = $"No AI prompts configured for section '{section.Heading}'."
+                    }
+                };
+                _reviewCache[section.Id] = (SpokeResults, CurrentSteps);
+                return;
+            }
+
+            CurrentSteps = steps;
+            SpokeResults = steps.Select(s => new SpokeResult { Label = s.Label }).ToList();
+            StateHasChanged();
+
+            await Orchestrator.RunAsync(
+                section.Heading,
+                section.Content,
+                steps,
+                SpokeResults,
+                StateHasChanged,
+                ct);
+
+            _reviewCache[section.Id] = (SpokeResults, CurrentSteps);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            SpokeResults = new List<SpokeResult>
+            {
+                new SpokeResult
+                {
+                    Label = "Error",
+                    Status = SpokeStatus.Failed,
+                    Error = $"Review failed: {ex.Message}"
+                }
+            };
+        }
+        finally
+        {
+            IsRunningAiReview = false;
+        }
+    }
+    private void CancelActiveReview()
+    {
+        _reviewCts?.Cancel();
+        _reviewCts?.Dispose();
+        _reviewCts = null;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        CancelActiveReview();
+        return ValueTask.CompletedTask;
     }
 
     private void SetSectionFilter(SectionFilterMode filter)
@@ -537,208 +915,1388 @@ public partial class Home : ComponentBase
         return Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
     }
 
-    private bool HasAdjacentIssue(int direction)
+    private void GenerateRazorMockScreen()
     {
-        if (SelectedSectionId is null)
+        MockGeneratorError = string.Empty;
+        if (CurrentSection is null)
+        {
+            MockGeneratorError = "Select a section first.";
+            return;
+        }
+
+        var razorCode = ExtractRazorCode(CurrentSection.Content);
+        if (string.IsNullOrWhiteSpace(razorCode))
+        {
+            MockGeneratorError = "No Razor code block found in this section.";
+            GeneratedMockScreen = null;
+            GeneratedMockJson = string.Empty;
+            GeneratedMockHtml = string.Empty;
+            return;
+        }
+
+        var screen = BuildMockScreenModel(razorCode, CurrentSection.Heading);
+        GeneratedMockScreen = screen;
+        GeneratedMockJson = JsonSerializer.Serialize(screen, new JsonSerializerOptions { WriteIndented = true });
+        GeneratedMockHtml = BuildMockScreenHtml(screen);
+    }
+
+    private async Task GenerateRazorMockScreenWithAiAsync()
+    {
+        if (IsGeneratingAiMock)
+        {
+            return;
+        }
+
+        MockGeneratorError = string.Empty;
+        if (CurrentSection is null)
+        {
+            MockGeneratorError = "Select a section first.";
+            return;
+        }
+
+        var razorCode = ExtractRazorCode(CurrentSection.Content);
+        if (string.IsNullOrWhiteSpace(razorCode))
+        {
+            MockGeneratorError = "No Razor code block found in this section.";
+            return;
+        }
+
+        IsGeneratingAiMock = true;
+        StateHasChanged();
+        try
+        {
+            var fastModel = BuildMockScreenModel(razorCode, CurrentSection.Heading);
+            var prompt = BuildAiMockPrompt(fastModel);
+            var json = await OllamaService.GenerateJsonAsync(prompt);
+
+            var aiModel = JsonSerializer.Deserialize<AiMockScreenSpec>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (!IsValidAiSpec(aiModel))
+            {
+                throw new InvalidOperationException("AI mock schema was invalid.");
+            }
+
+            var merged = ToRazorMockScreen(aiModel!);
+            GeneratedMockScreen = merged;
+            GeneratedMockJson = JsonSerializer.Serialize(aiModel, new JsonSerializerOptions { WriteIndented = true });
+            GeneratedMockHtml = BuildMockScreenHtml(merged);
+        }
+        catch (Exception ex)
+        {
+            GenerateRazorMockScreen();
+            MockGeneratorError = $"AI design failed, showing fast mock instead. ({ex.Message})";
+        }
+        finally
+        {
+            IsGeneratingAiMock = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CopyCurrentSectionContentAsync()
+    {
+        if (CurrentSection is null)
+        {
+            return;
+        }
+
+        var text = CurrentSection.Content ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("smartReview.copyTextToClipboard", text);
+        }
+        catch
+        {
+            // Ignore clipboard failures to avoid interrupting review flow.
+        }
+    }
+
+    private async Task CaptureGeneratedMockAsync()
+    {
+        if (GeneratedMockScreen is null || IsCapturingMockPng)
+        {
+            return;
+        }
+
+        IsCapturingMockPng = true;
+        MockGeneratorError = string.Empty;
+        StateHasChanged();
+        try
+        {
+            var safeTitle = Regex.Replace(GeneratedMockScreen.Title ?? "mock-screen", @"[^A-Za-z0-9\-]+", "-").Trim('-');
+            if (string.IsNullOrWhiteSpace(safeTitle))
+            {
+                safeTitle = "mock-screen";
+            }
+
+            var fileName = $"{safeTitle}-{DateTime.Now:yyyyMMdd-HHmmss}.png";
+            await JS.InvokeVoidAsync("smartReview.captureElementAsPng", "srs-generated-mock-render", fileName);
+        }
+        catch (Exception ex)
+        {
+            MockGeneratorError = $"Capture failed: {ex.Message}";
+        }
+        finally
+        {
+            IsCapturingMockPng = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ResetMockGeneratorState()
+    {
+        GeneratedMockScreen = null;
+        GeneratedMockJson = string.Empty;
+        GeneratedMockHtml = string.Empty;
+        MockGeneratorError = string.Empty;
+        ComparisonReportMarkdown = string.Empty;
+        ResetMockAttachmentSelection();
+    }
+
+    private void ResetMockAttachmentSelection()
+    {
+        ShowMockAttachmentPicker = false;
+        AvailableMockAttachments.Clear();
+        SelectedMockAttachmentUrl = null;
+    }
+
+    private async Task GenerateRazorMockComparisonAsync()
+    {
+        if (IsGeneratingComparison || CurrentSection is null || !CurrentSectionIsRazorPage)
+        {
+            return;
+        }
+
+        SyncActiveStoryWithLoadedSections();
+
+        if (ActiveStory is null)
+        {
+            MockGeneratorError = "Load a user story attachment first so mock files can be selected.";
+            return;
+        }
+
+        AvailableMockAttachments = ActiveStory.Attachments
+            .Where(IsMockAttachmentCandidate)
+            .OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (AvailableMockAttachments.Count == 0)
+        {
+            MockGeneratorError = "No mock attachments found for selected user story.";
+            return;
+        }
+
+        MockGeneratorError = string.Empty;
+        ComparisonReportMarkdown = string.Empty;
+        SelectedMockAttachmentUrl = AvailableMockAttachments[0].Url;
+        ShowMockAttachmentPicker = true;
+        StateHasChanged();
+        await Task.Delay(20);
+        await JS.InvokeVoidAsync("smartReview.scrollToElement", "srs-mock-attachment-picker");
+    }
+
+    private void SyncActiveStoryWithLoadedSections()
+    {
+        if (Sections.Count == 0 || DevOpsStories.Count == 0)
+        {
+            return;
+        }
+
+        var ids = Sections
+            .Select(s => ExtractStoryIdFromSourceFile(s.SourceFile))
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+
+        if (ids.Count != 1)
+        {
+            return;
+        }
+
+        var loadedStoryId = ids[0];
+        if (ActiveStory?.Id == loadedStoryId)
+        {
+            return;
+        }
+
+        var matching = DevOpsStories.FirstOrDefault(s => s.Id == loadedStoryId);
+        if (matching is not null)
+        {
+            ActiveStory = matching;
+        }
+    }
+
+    private static int? ExtractStoryIdFromSourceFile(string sourceFile)
+    {
+        if (string.IsNullOrWhiteSpace(sourceFile))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(sourceFile, @"US-(\d+)-", RegexOptions.IgnoreCase);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        return int.TryParse(match.Groups[1].Value, out var id) ? id : null;
+    }
+
+    private void CancelMockAttachmentPicker()
+    {
+        ShowMockAttachmentPicker = false;
+    }
+
+    private async Task ConfirmMockAttachmentComparisonAsync()
+    {
+        if (ActiveStory is null || CurrentSection is null || string.IsNullOrWhiteSpace(SelectedMockAttachmentUrl))
+        {
+            return;
+        }
+
+        if (!CurrentSectionIsRazorPage)
+        {
+            MockGeneratorError = "Current section is not a Razor Page section.";
+            return;
+        }
+
+        var razorCode = ExtractRazorCode(CurrentSection.Content);
+        if (string.IsNullOrWhiteSpace(razorCode))
+        {
+            MockGeneratorError = "No Razor code block found in this section.";
+            return;
+        }
+
+        var selectedAttachment = AvailableMockAttachments.FirstOrDefault(a => string.Equals(a.Url, SelectedMockAttachmentUrl, StringComparison.OrdinalIgnoreCase));
+        if (selectedAttachment is null)
+        {
+            MockGeneratorError = "Select a mock attachment.";
+            return;
+        }
+
+        IsGeneratingComparison = true;
+        ShowMockAttachmentPicker = false;
+        MockGeneratorError = string.Empty;
+        ComparisonReportMarkdown = string.Empty;
+        StartComparisonProgress("Preparing comparison...");
+        StateHasChanged();
+
+        try
+        {
+            UpdateComparisonProgress(28, "Loading selected mock...");
+            var mockupHtml = await AzureDevOpsService.DownloadAttachmentTextAsync(
+                selectedAttachment.Url,
+                DevOpsPatToken.Trim(),
+                CancellationToken.None);
+            UpdateComparisonProgress(58, "Analyzing structures...");
+            var prompt = BuildComparisonPrompt(razorCode, mockupHtml);
+            ComparisonReportMarkdown = await OllamaService.GenerateTextAsync(prompt);
+            UpdateComparisonProgress(88, "Finalizing report...");
+            if (string.IsNullOrWhiteSpace(ComparisonReportMarkdown))
+            {
+                throw new InvalidOperationException("Comparison output was empty.");
+            }
+            UpdateComparisonProgress(100, "Comparison complete.");
+        }
+        catch (Exception ex)
+        {
+            MockGeneratorError = $"Comparison generation failed: {ex.Message}";
+            StopComparisonProgress(reset: true);
+        }
+        finally
+        {
+            IsGeneratingComparison = false;
+            if (string.IsNullOrWhiteSpace(MockGeneratorError))
+            {
+                _ = CompleteAndHideComparisonProgressAsync();
+            }
+            StateHasChanged();
+        }
+    }
+
+    private void StartComparisonProgress(string initialLabel)
+    {
+        StopComparisonProgress(reset: true);
+        ComparisonProgressPercent = 8;
+        ComparisonProgressLabel = initialLabel;
+        _comparisonProgressCts = new CancellationTokenSource();
+        _ = SimulateComparisonProgressAsync(_comparisonProgressCts.Token);
+    }
+
+    private void UpdateComparisonProgress(int percent, string label)
+    {
+        ComparisonProgressPercent = Math.Max(ComparisonProgressPercent, Math.Min(percent, 100));
+        ComparisonProgressLabel = label;
+    }
+
+    private void StopComparisonProgress(bool reset)
+    {
+        _comparisonProgressCts?.Cancel();
+        _comparisonProgressCts?.Dispose();
+        _comparisonProgressCts = null;
+
+        if (reset)
+        {
+            ComparisonProgressPercent = 0;
+            ComparisonProgressLabel = string.Empty;
+            return;
+        }
+
+        ComparisonProgressPercent = 100;
+    }
+
+    private async Task CompleteAndHideComparisonProgressAsync()
+    {
+        StopComparisonProgress(reset: false);
+        await InvokeAsync(StateHasChanged);
+        await Task.Delay(900);
+        if (!IsGeneratingComparison)
+        {
+            StopComparisonProgress(reset: true);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SimulateComparisonProgressAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested && ComparisonProgressPercent < 92)
+            {
+                await Task.Delay(350, ct);
+                ComparisonProgressPercent = Math.Min(92, ComparisonProgressPercent + 3);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private static bool IsMockAttachmentCandidate(DevOpsAttachmentItem attachment)
+    {
+        if (attachment is null)
         {
             return false;
         }
 
-        var issueSections = IssueSections.ToList();
-        var currentIndex = issueSections.FindIndex(section => section.Id == SelectedSectionId);
-        if (currentIndex < 0)
+        var ext = attachment.Extension ?? string.Empty;
+        var name = attachment.Name ?? string.Empty;
+        var supportedExt = ext.Equals(".html", StringComparison.OrdinalIgnoreCase)
+                           || ext.Equals(".htm", StringComparison.OrdinalIgnoreCase);
+        if (!supportedExt)
         {
-            currentIndex = Sections.FindIndex(section => section.Id == SelectedSectionId);
-            return direction > 0
-                ? issueSections.Any(section => Sections.IndexOf(section) > currentIndex)
-                : issueSections.Any(section => Sections.IndexOf(section) < currentIndex);
+            return false;
         }
 
-        var nextIndex = currentIndex + direction;
-        return nextIndex >= 0 && nextIndex < issueSections.Count;
-    }
+        var positiveKeywords = new[] { "mock", "mockup", "wireframe", "screen", "ui" };
+        var negativeKeywords = new[] { "plan", "report", "qa-report", "analysis", "checklist", "notes" };
 
-    private void SelectAdjacentIssue(int direction)
-    {
-        if (SelectedSectionId is null)
+        var hasPositive = positiveKeywords.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase));
+        if (!hasPositive)
         {
-            return;
+            return false;
         }
 
-        var issueSections = IssueSections.ToList();
-        if (issueSections.Count == 0)
+        var hasNegative = negativeKeywords.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase));
+        return !hasNegative;
+    }
+
+    private string BuildComparisonPrompt(string razorCode, string mockupHtml)
+    {
+        var template = Configuration["Validation:ComparisonPromptTemplate"];
+        if (string.IsNullOrWhiteSpace(template) ||
+            string.Equals(template, "__USE_DEFAULT_COMPARISON_PROMPT__", StringComparison.OrdinalIgnoreCase))
         {
-            return;
+            template = DefaultComparisonPromptTemplate;
         }
 
-        var currentIssueIndex = issueSections.FindIndex(section => section.Id == SelectedSectionId);
-        if (currentIssueIndex >= 0)
+        var resolved = template
+            .Replace("{{RAZOR_CODE}}", razorCode, StringComparison.Ordinal)
+            .Replace("{{MOCKUP_HTML}}", mockupHtml, StringComparison.Ordinal);
+
+        var hasRazorPlaceholder = template.Contains("{{RAZOR_CODE}}", StringComparison.Ordinal);
+        var hasMockupPlaceholder = template.Contains("{{MOCKUP_HTML}}", StringComparison.Ordinal);
+        if (!hasRazorPlaceholder || !hasMockupPlaceholder)
         {
-            var nextIssueIndex = Math.Clamp(currentIssueIndex + direction, 0, issueSections.Count - 1);
-            SelectedSectionId = issueSections[nextIssueIndex].Id;
-            return;
+            resolved += $"""
+
+Razor file:
+```razor
+{razorCode}
+```
+
+Mockup HTML:
+```html
+{mockupHtml}
+```
+""";
         }
 
-        var currentSectionIndex = Sections.FindIndex(section => section.Id == SelectedSectionId);
-        var nextSection = direction > 0
-            ? issueSections.FirstOrDefault(section => Sections.IndexOf(section) > currentSectionIndex)
-            : issueSections.LastOrDefault(section => Sections.IndexOf(section) < currentSectionIndex);
+        return resolved;
+    }
 
-        if (nextSection is not null)
+    private bool TryGetComparisonStructurePanels(out string razorStructure, out string mockupStructure)
+    {
+        razorStructure = string.Empty;
+        mockupStructure = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(ComparisonReportMarkdown))
         {
-            SelectedSectionId = nextSection.Id;
+            return false;
         }
-    }
 
-    private void ToggleViolationsPanel()
-    {
-        IsViolationsPanelCollapsed = !IsViolationsPanelCollapsed;
-    }
+        var razorMatch = Regex.Match(
+            ComparisonReportMarkdown,
+            @"##\s*Razor\s*```text\s*(?<body>[\s\S]*?)```",
+            RegexOptions.IgnoreCase);
 
-    private void ToggleReason(string key)
-    {
-        if (!ExpandedReasonKeys.Add(key))
+        var mockupMatch = Regex.Match(
+            ComparisonReportMarkdown,
+            @"##\s*Mockup\s*```text\s*(?<body>[\s\S]*?)```",
+            RegexOptions.IgnoreCase);
+
+        if (!razorMatch.Success || !mockupMatch.Success)
         {
-            ExpandedReasonKeys.Remove(key);
+            return false;
         }
+
+        razorStructure = razorMatch.Groups["body"].Value.Trim();
+        mockupStructure = mockupMatch.Groups["body"].Value.Trim();
+        return !string.IsNullOrWhiteSpace(razorStructure) && !string.IsNullOrWhiteSpace(mockupStructure);
     }
 
-    private string BuildReasonKey(string sectionId, Violation violation, int groupIndex)
-    {
-        return $"{sectionId}|{violation.RuleId}|{groupIndex}|{violation.Matched.GetHashCode()}";
-    }
+    private const string DefaultComparisonPromptTemplate = """
+You are an expert Razor-to-Mockup UI migration analyzer.
 
-    private List<Violation> GetViolationsForSection(string sectionId)
-    {
-        return ViolationsBySection.TryGetValue(sectionId, out var violations)
-            ? violations
-            : new List<Violation>();
-    }
+Your task is to compare:
 
-    private SectionStatus GetSectionStatus(string sectionId)
-    {
-        var violations = GetViolationsForSection(sectionId);
-        var errorCount = violations.Count(v => IsSeverity(v.Severity, "error"));
-        var warningCount = violations.Count(v => IsSeverity(v.Severity, "warning"));
-        var total = violations.Count;
+1. Razor component structure
+2. Mockup HTML structure
 
-        if (errorCount > 0)
+The MOCKUP is the PRIMARY SOURCE OF TRUTH.
+
+You must generate output in EXACTLY the same format and structure shown below.
+
+==================================================
+CRITICAL PARSING RULE
+=====================
+
+Preserve EXACT physical source order from the Razor file.
+
+DO NOT:
+
+* infer semantic workflow order
+* rearrange controls logically
+* optimize hierarchy
+* reorder based on UX assumptions
+* interpret intended workflow
+
+The generated structure MUST strictly follow:
+
+* exact control order
+* exact nesting order
+* exact column order
+* exact source-code hierarchy
+
+from the Razor source file.
+
+==================================================
+RULES
+=====
+
+1. ONLY compare:
+
+   * controls
+   * control hierarchy
+   * control sequence
+   * field order
+   * field captions
+
+2. IGNORE:
+
+   * styling
+   * CSS
+   * colors
+   * spacing
+   * UX improvements
+   * visual enhancements
+   * app shell differences
+   * responsiveness
+   * typography
+   * animations
+   * visual states
+
+3. Treat MOCKUP as expected/base structure.
+
+4. Show ONLY differences.
+
+5. DO NOT explain business logic.
+
+6. DO NOT generate prose paragraphs.
+
+7. Output MUST remain highly structured.
+
+==================================================
+IMPORTANT SOURCE ORDER RULE
+===========================
+
+The structure diagram MUST reflect EXACT Razor source order.
+
+Example:
+
+If Razor contains:
+
+<MasterGrid />
+<CompanyFilter />
+<ContextIndicator />
+
+Then output MUST be:
+
+Master Grid
+↓
+Company Filter
+↓
+Context Indicator
+
+Even if UX or semantics suggest otherwise.
+
+==================================================
+GROUPING RULE
+=============
+
+If a Razor grid column contains:
+
+GroupIndex="0"
+
+DO NOT display it as a normal sequential field.
+
+Instead represent it as:
+
+⚠ Grouped By: FieldName
+
+Example:
+
+Wrong:
+CostHeadName
+↓
+Checkbox
+
+Correct:
+⚠ Grouped By: CostHeadName
+↓
+Checkbox
+
+==================================================
+HIGHLIGHTING RULES
+==================
+
+Use these markers EXACTLY:
+
+✅ Matching controls = normal text only
+❌ Missing/mismatched controls
+🔄 Sequence mismatch
+➕ Extra controls
+⚠ Different hierarchy/grouping
+
+DO NOT invent new symbols.
+
+==================================================
+OUTPUT FORMAT
+=============
+
+# COMPLETE CONTROL & FIELD SEQUENCE COMPARISON
+
+# OVERALL PAGE STRUCTURE
+
+## Razor
+
+```text
+Header
+↓
+Master Grid
+    ├── Code
+    ├── Name
+    ├── 🔄 InterProject
+    ├── 🔄 VoucherKind
+    ├── TaxesEnabled
+    ├── DoNotBookCommitment
+    └── DoNotShowInCtd
+↓
+❌ Company Filter
+↓
+Context Indicator
+↓
+Tabs
+    ├── Account Links Grid
+    │   ├── IsLinked
+    │   ├── AccountCode
+    │   └── AccountName
+    │
+    └── Cost Code Grid
+        ├── ⚠ Grouped By: CostHeadName
+        ├── 🔄 IsLinked
+        ├── CostCode
+        └── CostCodeName
+```
+
+---
+
+## Mockup
+
+```text
+Header
+↓
+Master Grid
+    ├── Code
+    ├── Name
+    ├── VoucherKind
+    ├── InterProject
+    ├── TaxesEnabled
+    ├── DoNotBookCommitment
+    ├── DoNotShowInCtd
+    └── ➕ Actions
+↓
+Context Indicator
+↓
+Company Filter
+↓
+Tabs
+    ├── Account Links Grid
+    │   ├── Select
+    │   ├── Account Number
+    │   └── Description
+    │
+    └── Cost Code Grid
+        ├── Select
+        ├── Cost Head
+        ├── Cost Code
+        └── Description
+```
+
+---
+
+# COMPLETE DIFFERENCE SUMMARY
+
+| Mockup/Base Expectation                                                              | Current Razor Difference                               | Type                   | Rectification Prompt                                                                                                                           |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Company Filter should appear AFTER Context Indicator and BEFORE Tabs                 | Razor places Company Filter BEFORE Context Indicator   | ⚠ Hierarchy Difference | Move the Company Filter section below Context Indicator and above Tabs to match the mockup structure.                                          |
+| Master Grid field order should be: `Code → Name → VoucherKind → InterProject`        | Razor uses: `Code → Name → InterProject → VoucherKind` | 🔄 Sequence Mismatch   | Reorder the `DxGridDataColumn` definitions inside `XpedeonCrudGrid` so that `VoucherKind` appears before `InterProject`.                       |
+| Master Grid should contain an `Actions` column at the end                            | Razor Master Grid does not contain an Actions column   | ➕ Missing Control      | Add an Actions column at the end of the `XpedeonCrudGrid` with row-level actions matching the mockup structure.                                |
+| Cost Code Grid should display Cost Head as visible column                            | Razor uses `GroupIndex="0"` for CostHeadName           | ⚠ Different Hierarchy  | Remove `GroupIndex="0"` from `CostHeadName` and render it as a visible standard column.                                                        |
+| Cost Code Grid field order should be: `Select → Cost Head → Cost Code → Description` | Razor uses grouped CostHead followed by checkbox       | 🔄 Sequence Mismatch   | Reorder Cost Code Grid columns so the checkbox column appears first, followed by visible `CostHeadName`, then `CostCode`, then `CostCodeName`. |
+| Account Links Grid captions should match mockup                                      | Razor uses technical labels                            | ❌ Label Mismatch       | Rename Account Grid captions to `Select`, `Account Number`, and `Description` while preserving bindings.                                       |
+| Cost Code Grid captions should match mockup                                          | Razor uses technical labels                            | ❌ Label Mismatch       | Rename Cost Code Grid captions to `Select`, `Cost Code`, and `Description` while preserving bindings.                                          |
+| Master Grid caption should display `Type`                                            | Razor uses `VoucherKind` caption                       | ❌ Label Mismatch       | Change the `VoucherKind` column caption to `Type`.                                                                                             |
+
+==================================================
+COMPARISON REQUIREMENTS
+=======================
+
+You MUST compare:
+
+1. Exact top-level layout order
+2. Exact grid order
+3. Exact tab order
+4. Exact child section order
+5. Exact column order
+6. Exact field captions
+7. Missing controls
+8. Extra controls
+9. Grouped vs visible columns
+10. Hierarchy mismatches
+11. Source-order mismatches
+
+==================================================
+FIELD ORDER RULES
+=================
+
+Field order comparison is mandatory.
+
+Example:
+
+Razor:
+Code
+↓
+Name
+↓
+InterProject
+↓
+VoucherKind
+
+Mockup:
+Code
+↓
+Name
+↓
+VoucherKind
+↓
+InterProject
+
+Must generate:
+
+🔄 Sequence Mismatch
+
+==================================================
+LABEL RULES
+===========
+
+If captions differ:
+
+Example:
+IsLinked vs Select
+
+Then generate:
+
+❌ Label Mismatch
+
+==================================================
+RECTIFICATION PROMPT RULES
+==========================
+
+Every mismatch MUST contain:
+
+* precise fix instruction
+* exact control name
+* exact movement/reorder instruction
+* exact expected structure
+
+Do NOT generate vague prompts.
+
+==================================================
+IMPORTANT
+=========
+
+1. Keep output deterministic.
+2. Preserve exact section headings.
+3. Preserve markdown table structure.
+4. Preserve tree indentation.
+5. Do NOT summarize.
+6. Do NOT shorten.
+7. Do NOT add extra commentary.
+8. Output should be production-review quality.
+9. Preserve EXACT Razor source order.
+10. Never infer semantic order over physical order.
+
+Now analyze the supplied Razor file and Mockup HTML and generate the comparison report in EXACTLY this format.
+""";
+
+
+    private static string ExtractRazorCode(string sectionContent)
+    {
+        if (string.IsNullOrWhiteSpace(sectionContent))
         {
-            return new SectionStatus
+            return string.Empty;
+        }
+
+        var blockRegex = new Regex(@"```(?<lang>[a-zA-Z0-9_-]+)?\s*\r?\n(?<code>[\s\S]*?)```", RegexOptions.IgnoreCase);
+        var matches = blockRegex.Matches(sectionContent);
+        if (matches.Count > 0)
+        {
+            // Prefer blocks that look like Razor/component markup.
+            foreach (Match m in matches)
             {
-                BadgeText = total.ToString(),
-                CssClass = "srs-badge-error"
+                var code = m.Groups["code"].Value.Trim();
+                if (LooksLikeRazorMarkup(code))
+                {
+                    return code;
+                }
+            }
+
+            // Fallback to first known markup language block.
+            foreach (Match m in matches)
+            {
+                var lang = (m.Groups["lang"].Value ?? string.Empty).Trim().ToLowerInvariant();
+                if (lang is "razor" or "cshtml" or "html")
+                {
+                    return m.Groups["code"].Value.Trim();
+                }
+            }
+
+            // Do not fallback to arbitrary code blocks like csharp.
+            return string.Empty;
+        }
+
+        return sectionContent.Contains("@page", StringComparison.OrdinalIgnoreCase)
+            ? sectionContent.Trim()
+            : string.Empty;
+    }
+
+    private static bool IsLikelyRazorSection(string heading, string content)
+    {
+        if (!string.IsNullOrWhiteSpace(heading) &&
+            heading.Contains("Razor Page", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return false;
+        }
+
+        return content.Contains("```razor", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("@page", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("<Dx", StringComparison.OrdinalIgnoreCase)
+            || content.Contains("<Xpedeon", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeRazorMarkup(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return false;
+        }
+
+        return code.Contains("@page", StringComparison.OrdinalIgnoreCase)
+            || code.Contains("<Dx", StringComparison.OrdinalIgnoreCase)
+            || code.Contains("<Xpedeon", StringComparison.OrdinalIgnoreCase)
+            || Regex.IsMatch(code, @"<\s*[A-Z][A-Za-z0-9]*", RegexOptions.Compiled);
+    }
+
+    private static RazorMockScreen BuildMockScreenModel(string razorCode, string fallbackTitle)
+    {
+        var title = ExtractTitle(razorCode, fallbackTitle);
+        var breadcrumbs = ExtractBreadcrumbHints(razorCode);
+        var controls = ExtractControls(razorCode);
+        var tabNames = ExtractTabNames(razorCode);
+        var gridColumns = ExtractGridColumns(razorCode);
+
+        return new RazorMockScreen
+        {
+            Title = title,
+            Breadcrumbs = breadcrumbs,
+            Controls = controls,
+            TabNames = tabNames,
+            GridColumns = gridColumns
+        };
+    }
+
+    private static string ExtractTitle(string razorCode, string fallbackTitle)
+    {
+        var titleMatch = Regex.Match(razorCode, "Title\\s*=\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase);
+        if (titleMatch.Success)
+        {
+            return titleMatch.Groups[1].Value.Trim();
+        }
+
+        var pageMatch = Regex.Match(razorCode, "@page\\s+\"([^\"]+)\"", RegexOptions.IgnoreCase);
+        if (pageMatch.Success)
+        {
+            return pageMatch.Groups[1].Value.Trim('/');
+        }
+
+        return string.IsNullOrWhiteSpace(fallbackTitle) ? "Generated screen" : fallbackTitle;
+    }
+
+    private static List<string> ExtractBreadcrumbHints(string razorCode)
+    {
+        var crumbs = new List<string>();
+        foreach (Match match in Regex.Matches(razorCode, "\"([^\"]{2,})\""))
+        {
+            var token = match.Groups[1].Value.Trim();
+            if (token.Length > 40)
+            {
+                continue;
+            }
+
+            if (!Regex.IsMatch(token, "^[A-Za-z][A-Za-z0-9\\s\\-/&]+$"))
+            {
+                continue;
+            }
+
+            if (crumbs.Contains(token, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            crumbs.Add(token);
+            if (crumbs.Count == 4)
+            {
+                break;
+            }
+        }
+
+        return crumbs;
+    }
+
+    private static List<RazorMockControl> ExtractControls(string razorCode)
+    {
+        var controls = new List<RazorMockControl>();
+        var tagRegex = new Regex(@"<(?<name>[A-Za-z][A-Za-z0-9]*)\b(?<attrs>[^>]*)/?>", RegexOptions.Compiled);
+
+        foreach (Match tagMatch in tagRegex.Matches(razorCode))
+        {
+            var name = tagMatch.Groups["name"].Value;
+            if (!IsMockableTag(name))
+            {
+                continue;
+            }
+
+            if (IsNoiseTag(name))
+            {
+                continue;
+            }
+
+            var attrs = tagMatch.Groups["attrs"].Value;
+            var label = ExtractAttributeValue(attrs, "Caption")
+                        ?? ExtractAttributeValue(attrs, "Text")
+                        ?? ExtractAttributeValue(attrs, "Label")
+                        ?? name;
+
+            var controlType = MapControlType(name);
+            controls.Add(new RazorMockControl
+            {
+                Name = name,
+                ControlType = controlType,
+                Label = NormalizeLabel(label)
+            });
+        }
+
+        return controls;
+    }
+
+    private static bool IsMockableTag(string tagName)
+    {
+        if (tagName.StartsWith("Dx", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (tagName.StartsWith("Xpedeon", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return tagName is "SimpleListPageHeader" or "EditForm" or "ValidationSummary";
+    }
+
+    private static bool IsNoiseTag(string tagName)
+    {
+        return tagName.EndsWith("Settings", StringComparison.OrdinalIgnoreCase)
+               || tagName is "DxListEditorColumn"
+               || tagName is "DxModelHost";
+    }
+
+    private static string? ExtractAttributeValue(string attrs, string attrName)
+    {
+        var match = Regex.Match(attrs, $"{attrName}\\s*=\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value.Trim() : null;
+    }
+
+    private static string MapControlType(string tagName)
+    {
+        return tagName switch
+        {
+            "DxTextBox" => "Text Input",
+            "DxComboBox" => "Dropdown",
+            "DxDateEdit" => "Date Picker",
+            "DxCheckBox" => "Checkbox",
+            "DxButton" => "Button",
+            "DxGrid" => "Data Grid",
+            "DxTabs" => "Tabs",
+            "DxTabPage" => "Tab Page",
+            "DxFormLayout" => "Form",
+            "DxMemo" => "Multi-line Input",
+            "SimpleListPageHeader" => "Page Header",
+            _ when tagName.StartsWith("Dx", StringComparison.Ordinal) => "DevExpress Component",
+            _ => "Generic Component"
+        };
+    }
+
+    private static string NormalizeLabel(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "Field";
+        }
+
+        var nameofMatch = Regex.Match(raw, @"nameof\(([^)]+)\)", RegexOptions.IgnoreCase);
+        if (nameofMatch.Success)
+        {
+            var token = nameofMatch.Groups[1].Value.Trim();
+            var lastPart = token.Split('.').LastOrDefault() ?? token;
+            return HumanizeToken(lastPart);
+        }
+
+        if (raw.StartsWith("@", StringComparison.Ordinal))
+        {
+            return "Field";
+        }
+
+        return HumanizeToken(raw);
+    }
+
+    private static string HumanizeToken(string value)
+    {
+        var trimmed = value.Trim().Trim('"');
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return "Field";
+        }
+
+        var withSpaces = Regex.Replace(trimmed, "([a-z])([A-Z])", "$1 $2");
+        withSpaces = withSpaces.Replace("_", " ", StringComparison.Ordinal);
+        return Regex.Replace(withSpaces, @"\s+", " ").Trim();
+    }
+
+    private static List<string> ExtractTabNames(string razorCode)
+    {
+        var names = new List<string>();
+        var tabMatches = Regex.Matches(razorCode, @"<TextTemplate>([\s\S]*?)</TextTemplate>", RegexOptions.IgnoreCase);
+        foreach (Match tab in tabMatches)
+        {
+            var content = tab.Groups[1].Value;
+            var literal = Regex.Match(content, "\"([^\"]+)\"");
+            var raw = literal.Success ? literal.Groups[1].Value : content;
+            var normalized = NormalizeLabel(raw);
+            if (string.IsNullOrWhiteSpace(normalized) || normalized.Equals("Field", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!names.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            {
+                names.Add(normalized);
+            }
+        }
+
+        return names;
+    }
+
+    private static List<string> ExtractGridColumns(string razorCode)
+    {
+        var columns = new List<string>();
+        var columnMatches = Regex.Matches(razorCode, @"<DxGridDataColumn\b([\s\S]*?)(/?>)", RegexOptions.IgnoreCase);
+        foreach (Match columnMatch in columnMatches)
+        {
+            var attrs = columnMatch.Groups[1].Value;
+            var fieldName = ExtractAttributeValue(attrs, "FieldName") ?? string.Empty;
+            var label = NormalizeLabel(fieldName);
+            if (label.Equals("Field", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!columns.Contains(label, StringComparer.OrdinalIgnoreCase))
+            {
+                columns.Add(label);
+            }
+        }
+
+        return columns;
+    }
+
+    private static string BuildMockScreenHtml(RazorMockScreen screen)
+    {
+        var fieldControls = screen.Controls
+            .Where(c => c.ControlType is "Text Input" or "Dropdown" or "Date Picker" or "Checkbox" or "Multi-line Input")
+            .ToList();
+        var tabNames = screen.TabNames.Count > 0
+            ? screen.TabNames
+            : screen.Controls.Where(c => c.ControlType == "Tab Page").Select(c => c.Label).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        var hasGrid = screen.GridColumns.Count > 0 || screen.Controls.Any(c => c.ControlType == "Data Grid");
+
+        if (fieldControls.Count == 0)
+        {
+            fieldControls = new List<RazorMockControl>
+            {
+                new() { Name = "XpedeonCompanySelector", ControlType = "Dropdown", Label = "Company" }
             };
         }
 
-        if (warningCount > 0 || total > 0)
+        var cols = screen.GridColumns.Count > 0 ? screen.GridColumns.Take(6).ToList() : new List<string> { "Code", "Name", "Type" };
+        var tabs = tabNames.Count > 0 ? tabNames : new List<string> { "Account Links", "Cost Code Links" };
+        var title = EscapeHtml(screen.Title.Contains("localizer", StringComparison.OrdinalIgnoreCase) ? "Journal Voucher Types" : screen.Title);
+        var breadcrumb = screen.Breadcrumbs.Count > 0 ? string.Join(" / ", screen.Breadcrumbs.Select(EscapeHtml)) : "Nominal Ledger / Setup";
+
+        var sb = new StringBuilder();
+        sb.Append("""
+<style>
+.tm{background:#e8e4f5;border:1px solid rgba(196,191,224,.55);border-radius:12px;overflow:hidden;font-family:'Barlow',Segoe UI,Arial,sans-serif}
+.tm-head{padding:12px 16px;border-bottom:1px solid rgba(196,191,224,.55);background:#fff}
+.tm-bc{font-size:11px;color:#9489c0}
+.tm-title{font-family:'Barlow Condensed',Segoe UI,sans-serif;font-size:24px;color:#452e82;font-weight:700;margin:2px 0 0}
+.tm-content{padding:14px}
+.tm-card{background:#fff;border:1px solid rgba(196,191,224,.55);border-radius:12px;overflow:hidden;margin-bottom:12px}
+.tm-card-h{padding:10px 14px;background:#faf9fe;border-bottom:1px solid rgba(196,191,224,.5);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#452e82}
+.tm-grid{width:100%;border-collapse:collapse}
+.tm-grid th{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#9489c0;background:#faf9fe;padding:10px 12px;text-align:left;border-bottom:1px solid rgba(196,191,224,.5)}
+.tm-grid td{padding:11px 12px;border-bottom:1px solid rgba(196,191,224,.25)}
+.tm-tabs{display:flex;gap:6px;padding:10px 12px;background:#fff;border-bottom:1px solid rgba(196,191,224,.5)}
+.tm-tab{padding:6px 12px;border-radius:999px;font-size:12px;background:#f3f0fd;color:#5a4e8a;border:1px solid rgba(196,191,224,.7)}
+.tm-tab.active{background:#e2d8ff;color:#452e82;font-weight:700}
+.tm-actions{display:flex;justify-content:flex-end;gap:8px;padding:12px}
+.tm-btn{padding:7px 14px;border-radius:8px;border:1px solid transparent;font-size:12px}
+.tm-btn-save{background:#8c5cff;color:#fff}
+.tm-btn-cancel{background:#fff;color:#5a4e8a;border-color:rgba(196,191,224,.8)}
+.tm-filter{padding:10px 12px;border-bottom:1px solid rgba(196,191,224,.4);display:grid;grid-template-columns:220px 1fr;gap:10px;align-items:center}
+.tm-sel{height:30px;border:1px solid rgba(196,191,224,.8);border-radius:8px;background:#fff}
+</style>
+""");
+        sb.Append("<div class=\"tm\">");
+        sb.Append($"<div class=\"tm-head\"><div class=\"tm-bc\">{breadcrumb}</div><div class=\"tm-title\">{title}</div></div>");
+        sb.Append("<div class=\"tm-content\">");
+        sb.Append("<div class=\"tm-card\">");
+        sb.Append("<div class=\"tm-filter\"><strong>Company</strong><div class=\"tm-sel\"></div></div>");
+        sb.Append("<div class=\"tm-card-h\">Journal Voucher Types</div>");
+        if (hasGrid)
         {
-            return new SectionStatus
+            sb.Append("<table class=\"tm-grid\"><thead><tr>");
+            foreach (var c in cols) sb.Append($"<th>{EscapeHtml(c)}</th>");
+            sb.Append("</tr></thead><tbody><tr>");
+            foreach (var _ in cols) sb.Append("<td>...</td>");
+            sb.Append("</tr><tr>");
+            foreach (var _ in cols) sb.Append("<td>...</td>");
+            sb.Append("</tr></tbody></table>");
+        }
+        sb.Append("</div>");
+        sb.Append("<div class=\"tm-card\">");
+        sb.Append("<div class=\"tm-tabs\">");
+        for (var i = 0; i < tabs.Count; i++) sb.Append($"<div class=\"tm-tab {(i == 0 ? "active" : string.Empty)}\">{EscapeHtml(tabs[i])}</div>");
+        sb.Append("</div>");
+        sb.Append("<div class=\"tm-card-h\">Linked Details</div>");
+        sb.Append("<table class=\"tm-grid\"><thead><tr><th>Select</th><th>Code</th><th>Description</th></tr></thead><tbody><tr><td>âœ“</td><td>...</td><td>...</td></tr><tr><td>âœ“</td><td>...</td><td>...</td></tr></tbody></table>");
+        sb.Append("</div>");
+        sb.Append("<div class=\"tm-actions\"><button class=\"tm-btn tm-btn-save\">Save</button><button class=\"tm-btn tm-btn-cancel\">Cancel</button></div>");
+        sb.Append("</div></div>");
+        return sb.ToString();
+    }
+
+    private static string BuildAiMockPrompt(RazorMockScreen fastModel)
+    {
+        var inputJson = JsonSerializer.Serialize(fastModel, new JsonSerializerOptions { WriteIndented = true });
+        return $$"""
+You are a UI designer. Generate a polished mock screen specification from parsed Razor controls.
+Return only valid JSON. No markdown. No explanation.
+
+Required JSON schema:
+{
+  "title": "string",
+  "breadcrumbs": ["string"],
+  "sections": [
+    {
+      "name": "string",
+      "kind": "form|tabs|table|actions",
+      "fields": [
+        { "label": "string", "controlType": "Text Input|Dropdown|Date Picker|Checkbox|Multi-line Input|Button", "placeholder": "string" }
+      ],
+      "tabs": ["string"],
+      "columns": ["string"],
+      "actions": ["string"]
+    }
+  ]
+}
+
+Rules:
+- Keep labels human-friendly and short.
+- Group similar fields under one form section.
+- If controls include grids, add a table section with inferred columns.
+- If controls include tab pages, add tabs section.
+- Add actions section with Save and Cancel if no actions found.
+
+Input model:
+{{inputJson}}
+""";
+    }
+
+    private static bool IsValidAiSpec(AiMockScreenSpec? spec)
+    {
+        return spec is not null
+               && !string.IsNullOrWhiteSpace(spec.Title)
+               && spec.Sections is not null
+               && spec.Sections.Count > 0;
+    }
+
+    private static RazorMockScreen ToRazorMockScreen(AiMockScreenSpec spec)
+    {
+        var controls = new List<RazorMockControl>();
+        var tabNames = new List<string>();
+        var gridColumns = new List<string>();
+        foreach (var section in spec.Sections)
+        {
+            foreach (var field in section.Fields)
             {
-                BadgeText = total.ToString(),
-                CssClass = "srs-badge-warning"
-            };
+                controls.Add(new RazorMockControl
+                {
+                    Name = field.ControlType.Replace(" ", string.Empty, StringComparison.Ordinal),
+                    ControlType = field.ControlType,
+                    Label = field.Label
+                });
+            }
+
+            foreach (var action in section.Actions)
+            {
+                controls.Add(new RazorMockControl
+                {
+                    Name = "DxButton",
+                    ControlType = "Button",
+                    Label = action
+                });
+            }
+
+            foreach (var tab in section.Tabs)
+            {
+                tabNames.Add(tab);
+                controls.Add(new RazorMockControl
+                {
+                    Name = "DxTabPage",
+                    ControlType = "Tab Page",
+                    Label = tab
+                });
+            }
+
+            if (section.Kind.Equals("table", StringComparison.OrdinalIgnoreCase))
+            {
+                gridColumns.AddRange(section.Columns);
+                controls.Add(new RazorMockControl
+                {
+                    Name = "DxGrid",
+                    ControlType = "Data Grid",
+                    Label = "Grid"
+                });
+            }
         }
 
-        return new SectionStatus
+        return new RazorMockScreen
         {
-            BadgeText = "OK",
-            CssClass = "srs-badge-clean"
+            Title = spec.Title,
+            Breadcrumbs = spec.Breadcrumbs ?? new List<string>(),
+            Controls = controls,
+            TabNames = tabNames.Where(t => !string.IsNullOrWhiteSpace(t)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            GridColumns = gridColumns.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
         };
     }
 
-    private static bool IsSeverity(string value, string expected)
+    private sealed class RazorMockScreen
     {
-        return value.Equals(expected, StringComparison.OrdinalIgnoreCase);
+        public string Title { get; init; } = string.Empty;
+        public List<string> Breadcrumbs { get; init; } = new();
+        public List<RazorMockControl> Controls { get; init; } = new();
+        public List<string> TabNames { get; init; } = new();
+        public List<string> GridColumns { get; init; } = new();
     }
 
-    private static string GetSeverityHeading(string severity)
+    private sealed class RazorMockControl
     {
-        return severity.ToLowerInvariant() switch
-        {
-            "error" => "Errors",
-            "warning" => "Warnings",
-            "info" => "Info",
-            _ => "Other"
-        };
+        public string Name { get; init; } = string.Empty;
+        public string ControlType { get; init; } = string.Empty;
+        public string Label { get; init; } = string.Empty;
     }
 
-    private static string GetSeverityClass(string severity)
+    private sealed class AiMockScreenSpec
     {
-        return severity.ToLowerInvariant() switch
-        {
-            "error" => "severity-error",
-            "warning" => "severity-warning",
-            "info" => "severity-info",
-            _ => "severity-info"
-        };
+        public string Title { get; init; } = string.Empty;
+        public List<string> Breadcrumbs { get; init; } = new();
+        public List<AiMockSectionSpec> Sections { get; init; } = new();
     }
 
-    private static string GetSectionConclusion(IReadOnlyCollection<Violation> violations)
+    private sealed class AiMockSectionSpec
     {
-        if (violations.Count == 0)
+        public string Name { get; init; } = string.Empty;
+        public string Kind { get; init; } = "form";
+        public List<AiMockFieldSpec> Fields { get; init; } = new();
+        public List<string> Tabs { get; init; } = new();
+        public List<string> Columns { get; init; } = new();
+        public List<string> Actions { get; init; } = new();
+    }
+
+    private sealed class AiMockFieldSpec
+    {
+        public string Label { get; init; } = string.Empty;
+        public string ControlType { get; init; } = "Text Input";
+        public string Placeholder { get; init; } = string.Empty;
+    }
+
+    private void RefreshSourceFilters()
+    {
+        _selectedSourceFile = null;
+    }
+
+    private void SelectSourceFile(string sourceFile)
+    {
+        _selectedSourceFile = sourceFile;
+        var filtered = FilteredSections.ToList();
+        if (filtered.Count == 0)
         {
-            return "This section is clean.";
+            SelectedSectionId = null;
+            return;
         }
 
-        var errorCount = violations.Count(violation => IsSeverity(violation.Severity, "error"));
-        var warningCount = violations.Count(violation => IsSeverity(violation.Severity, "warning"));
-
-        if (errorCount > 0)
+        if (!filtered.Any(s => s.Id == SelectedSectionId))
         {
-            return $"{errorCount} blocking issue{(errorCount == 1 ? string.Empty : "s")} needs revision.";
-        }
-
-        if (warningCount > 0)
-        {
-            return $"{warningCount} warning{(warningCount == 1 ? string.Empty : "s")} should be checked.";
-        }
-
-        return $"{violations.Count} note{(violations.Count == 1 ? string.Empty : "s")} found.";
-    }
-
-    private static string GetSectionAction(IReadOnlyCollection<Violation> violations)
-    {
-        if (violations.Count == 0)
-        {
-            return "No action is required for this section. Move to the next section that has issues.";
-        }
-
-        var firstError = violations.FirstOrDefault(violation => IsSeverity(violation.Severity, "error"));
-        var primaryViolation = firstError ?? violations.First();
-        return $"Start with {primaryViolation.RuleId}: {primaryViolation.Fix}";
-    }
-
-    private void OpenRevisionPromptModal()
-    {
-        RevisionPromptText = BuildRevisionPrompt();
-        ShowRevisionModal = true;
-        CopyButtonLabel = "Copy to Clipboard";
-    }
-
-    private void CloseRevisionPromptModal()
-    {
-        ShowRevisionModal = false;
-    }
-
-    private async Task CopyRevisionPromptAsync()
-    {
-        try
-        {
-            await JS.InvokeVoidAsync("navigator.clipboard.writeText", RevisionPromptText);
-            CopyButtonLabel = "Copied";
-            StateHasChanged();
-            await Task.Delay(2000);
-            CopyButtonLabel = "Copy to Clipboard";
-            StateHasChanged();
-        }
-        catch
-        {
-            CopyButtonLabel = "Copy failed";
+            SelectedSectionId = filtered[0].Id;
         }
     }
 
-    private static List<SectionModel> ParseSections(string markdown)
+    private void ShowAllSourceFiles()
+    {
+        _selectedSourceFile = null;
+        var filtered = FilteredSections.ToList();
+        if (filtered.Count == 0)
+        {
+            SelectedSectionId = null;
+            return;
+        }
+
+        if (!filtered.Any(s => s.Id == SelectedSectionId))
+        {
+            SelectedSectionId = filtered[0].Id;
+        }
+    }
+
+    private void RemoveSourceFileFromList(string sourceFile)
+    {
+        var remaining = Sections
+            .Where(section => !string.Equals(section.SourceFile, sourceFile, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (remaining.Count == Sections.Count)
+        {
+            return;
+        }
+
+        Sections.Clear();
+        Sections.AddRange(remaining.Select((section, index) => new SectionModel
+        {
+            Id = $"section-{index + 1}",
+            Letter = section.Letter,
+            Heading = section.Heading,
+            LineStart = section.LineStart,
+            LineCount = section.LineCount,
+            Content = section.Content,
+            SourceFile = section.SourceFile
+        }));
+
+        if (string.Equals(_selectedSourceFile, sourceFile, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedSourceFile = null;
+        }
+
+        _reviewCache.Clear();
+
+        if (Sections.Count == 0)
+        {
+            SelectedSectionId = null;
+            return;
+        }
+
+        if (!Sections.Any(s => s.Id == SelectedSectionId))
+        {
+            SelectedSectionId = Sections[0].Id;
+        }
+    }
+
+    private static List<SectionModel> ParseSections(string markdown, string sourceFile)
     {
         var normalized = markdown.Replace("\r\n", "\n");
         var lines = normalized.Split('\n');
@@ -758,7 +2316,7 @@ public partial class Home : ComponentBase
             {
                 if (encounteredHeading || buffer.Count > 0)
                 {
-                    AddSection(sections, currentHeading, currentStart, buffer);
+                    AddSection(sections, currentHeading, currentStart, buffer, sourceFile);
                 }
 
                 currentHeading = headingMatch.Groups[1].Value.Trim();
@@ -773,7 +2331,7 @@ public partial class Home : ComponentBase
 
         if (encounteredHeading || buffer.Count > 0)
         {
-            AddSection(sections, currentHeading, currentStart, buffer);
+            AddSection(sections, currentHeading, currentStart, buffer, sourceFile);
         }
 
         if (sections.Count == 0)
@@ -785,14 +2343,15 @@ public partial class Home : ComponentBase
                 Heading = "Preamble",
                 LineStart = 1,
                 LineCount = lines.Length,
-                Content = markdown.Trim()
+                Content = markdown.Trim(),
+                SourceFile = sourceFile
             });
         }
 
         return sections;
     }
 
-    private static void AddSection(List<SectionModel> sections, string heading, int lineStart, List<string> lines)
+    private static void AddSection(List<SectionModel> sections, string heading, int lineStart, List<string> lines, string sourceFile)
     {
         var parsed = ParseHeading(heading, sections.Count);
         var content = string.Join('\n', lines).TrimEnd();
@@ -804,7 +2363,8 @@ public partial class Home : ComponentBase
             Heading = parsed.Title,
             LineStart = lineStart,
             LineCount = Math.Max(1, lines.Count),
-            Content = content
+            Content = content,
+            SourceFile = sourceFile
         });
     }
 
@@ -1124,6 +2684,9 @@ public partial class Home : ComponentBase
         return true;
     }
 
+    private static MarkupString FormatInlineMarkup(string? text) =>
+        new MarkupString(FormatInline(text ?? string.Empty));
+
     private static string FormatInline(string input)
     {
         var text = EscapeHtml(input);
@@ -1145,1448 +2708,20 @@ public partial class Home : ComponentBase
             .Replace(">", "&gt;", StringComparison.Ordinal);
     }
 
-    // ============================================================
-    // SECTION 3: DETECTION ENGINE (run rules against sections)
-    // ============================================================
-    private static Dictionary<string, List<Violation>> RunAllRules(
-        IReadOnlyList<SectionModel> sections,
-        IReadOnlyList<AntipatternRule> rules,
-        IReadOnlySet<RuleProfile> activeProfiles)
+    private static string JsonElementToDisplay(JsonElement element)
     {
-        var results = new Dictionary<string, List<Violation>>(StringComparer.OrdinalIgnoreCase);
-        var effectiveRules = rules
-            .Where(rule => rule.Profile == RuleProfile.Any || activeProfiles.Contains(rule.Profile))
-            .ToList();
-
-        foreach (var section in sections)
+        return element.ValueKind switch
         {
-            var violations = new List<Violation>();
-
-            foreach (var rule in effectiveRules)
-            {
-                var matches = rule.Detect(section.Content);
-                foreach (var match in matches)
-                {
-                    var excerpt = !string.IsNullOrWhiteSpace(match.Context)
-                        ? match.Context
-                        : match.Matched;
-
-                    violations.Add(new Violation
-                    {
-                        RuleId = rule.Id,
-                        Severity = rule.Severity,
-                        Title = rule.Title,
-                        Matched = Truncate(excerpt, 120),
-                        Fix = rule.Fix,
-                        Reason = rule.Reason
-                    });
-                }
-            }
-
-            results[section.Id] = violations
-                .OrderBy(v => SeverityRank(v.Severity))
-                .ThenBy(v => v.RuleId, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
-        return results;
-    }
-
-    private static IReadOnlySet<RuleProfile> DetectActiveRuleProfiles(string content, string fileName)
-    {
-        var normalized = content ?? string.Empty;
-        var normalizedFileName = fileName ?? string.Empty;
-        var scores = new Dictionary<RuleProfile, int>
-        {
-            [RuleProfile.Code] = 0,
-            [RuleProfile.UserStory] = 0,
-            [RuleProfile.ModuleSpec] = 0
-        };
-
-        if (Regex.IsMatch(normalized, @"<DxGrid\b|<XpedeonCrudGrid\b|DxComboBoxSettings|IEntityTypeConfiguration|FromSqlInterpolated|FromSqlRaw|HasTrigger\s*\(", RegexOptions.IgnoreCase))
-        {
-            scores[RuleProfile.Code] += 3;
-        }
-        if (Regex.IsMatch(normalizedFileName, @"\.(cs|razor|proto|sql)$", RegexOptions.IgnoreCase))
-        {
-            scores[RuleProfile.Code] += 2;
-        }
-
-        if (Regex.IsMatch(normalized, @"^###\s+(?:US|UUS|U)-\d+.*$|^##\s*User Stor(y|ies)", RegexOptions.IgnoreCase | RegexOptions.Multiline))
-        {
-            scores[RuleProfile.UserStory] += 3;
-        }
-        if (Regex.IsMatch(normalized, @"\bAcceptance Criteria\b|\bEdge Cases\b|\bComplexity\b", RegexOptions.IgnoreCase))
-        {
-            scores[RuleProfile.UserStory] += 1;
-        }
-
-        if (Regex.IsMatch(normalized, @"^##\s*Scope|^##\s*Success Criteria|^##\s*Current Tech Stack|^##\s*Stored Procedure Inventory|^##\s*Business Rule Consolidation", RegexOptions.IgnoreCase | RegexOptions.Multiline))
-        {
-            scores[RuleProfile.ModuleSpec] += 3;
-        }
-        if (Regex.IsMatch(normalizedFileName, @"plan|migration|module", RegexOptions.IgnoreCase))
-        {
-            scores[RuleProfile.ModuleSpec] += 1;
-        }
-
-        var maxScore = scores.Values.Max();
-        if (maxScore <= 0)
-        {
-            return new HashSet<RuleProfile> { RuleProfile.ModuleSpec };
-        }
-
-        var active = scores
-            .Where(kvp => kvp.Value > 0 && maxScore - kvp.Value <= 1)
-            .Select(kvp => kvp.Key)
-            .ToHashSet();
-
-        if (active.Count == 0)
-        {
-            active.Add(scores.OrderByDescending(kvp => kvp.Value).First().Key);
-        }
-
-        return active;
-    }
-
-    private static int SeverityRank(string severity)
-    {
-        return severity.ToLowerInvariant() switch
-        {
-            "error" => 0,
-            "warning" => 1,
-            "info" => 2,
-            _ => 3
+            JsonValueKind.String => element.GetString() ?? string.Empty,
+            JsonValueKind.Number => element.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            JsonValueKind.Null => "-",
+            JsonValueKind.Undefined => "-",
+            JsonValueKind.Array => element.ToString(),
+            JsonValueKind.Object => element.ToString(),
+            _ => element.ToString()
         };
     }
-
-    private static IReadOnlyList<AntipatternRule> CreateRulebook()
-    {
-        var rules = new List<AntipatternRule>
-        {
-            new()
-            {
-                Id = "AP-UI-001",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "FilterFieldNames on DxGrid columns",
-                Detect = DetectApUi001,
-                Fix = "Remove FilterFieldNames. Use ValueFieldName + TextFieldName on the combo editor instead.",
-                Reason = "DevExpress 25.2.3 throws KeyNotFoundException."
-            },
-            new()
-            {
-                Id = "AP-UI-002",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "CellDisplayTemplate on required FK columns",
-                Detect = DetectApUi002,
-                Fix = "Remove CellDisplayTemplate from required FK columns. Use EditSettings with DxComboBoxSettings instead.",
-                Reason = "Suppresses validation icon on required fields."
-            },
-            new()
-            {
-                Id = "AP-UI-003",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "Columns without paired EditFormat on combo cells",
-                Detect = DetectApUi003,
-                Fix = "Add `<EditFormat>{0} - {1}</EditFormat>` after the `<Columns>` block inside every DxComboBoxSettings.",
-                Reason = "DevExpress 25.2.3 KeyNotFoundException (dead-end #2)."
-            },
-            new()
-            {
-                Id = "AP-UI-004",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "SortIndex on grid with FocusedRowEnabled",
-                Detect = DetectApUi004,
-                Fix = "Remove SortIndex. Control sort order via in-place list Sort after data load.",
-                Reason = "Causes dead-end focus loop (dead-end #7)."
-            },
-            new()
-            {
-                Id = "AP-UI-005",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "CustomizeElement on XpedeonCrudGrid",
-                Detect = DetectApUi005,
-                Fix = "Remove CustomizeElement. Only valid on raw DxGrid, not XpedeonCrudGrid wrapper.",
-                Reason = "Silent crash - XpedeonCrudGrid does not expose this event."
-            },
-            new()
-            {
-                Id = "AP-UI-006",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "Raw DxGrid used for CRUD surfaces",
-                Detect = DetectApUi006,
-                Fix = "Replace DxGrid with XpedeonCrudGrid for CRUD surfaces.",
-                Reason = "XpedeonCrudGrid wraps DxGrid with standardized CRUD behavior."
-            },
-            new()
-            {
-                Id = "AP-UI-007",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "Reassigning FormModel collection lists",
-                Detect = DetectApUi007,
-                Fix = "Use in-place mutation: list.Clear() then list.AddRange(newData). Never reassign the list reference.",
-                Reason = "Reassignment breaks Blazor change tracking and DxGrid data binding."
-            },
-            new()
-            {
-                Id = "AP-UI-008",
-                Category = "UI / Razor",
-                Severity = "warning",
-                Title = "Missing TextFieldName=\"DisplayText\" on FK combo columns",
-                Detect = DetectApUi008,
-                Fix = "Add TextFieldName=\"DisplayText\" to every DxComboBoxSettings bound to an FK lookup.",
-                Reason = "Without it, the combo displays the raw value instead of the formatted display text."
-            },
-            new()
-            {
-                Id = "AP-UI-009",
-                Category = "UI / Razor",
-                Severity = "warning",
-                Title = "Missing EnableValidation=\"false\" on DxComboBox inside CellEditTemplate",
-                Detect = DetectApUi009,
-                Fix = "Add EnableValidation=\"false\" to every DxComboBox inside CellEditTemplate.",
-                Reason = "Prevents duplicate validation messages."
-            },
-            new()
-            {
-                Id = "AP-UI-010",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "CaptionPosition.Horizontal",
-                Detect = DetectApUi010,
-                Fix = "Remove. Use default caption positioning.",
-                Reason = "Banned - breaks Xpedeon layout system."
-            },
-            new()
-            {
-                Id = "AP-UI-011",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "ColSpanMd",
-                Detect = DetectApUi011,
-                Fix = "Remove. Use CSS grid or Xpedeon layout classes.",
-                Reason = "Banned - not supported in the component library version."
-            },
-            new()
-            {
-                Id = "AP-UI-012",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "NewItemRowPosition (wrong property name)",
-                Detect = DetectApUi012,
-                Fix = "Replace with EditNewRowPosition.",
-                Reason = "Wrong property name - it's EditNewRowPosition on XpedeonCrudGrid."
-            },
-            new()
-            {
-                Id = "AP-UI-013",
-                Category = "UI / Razor",
-                Severity = "error",
-                Title = "Visible attribute on DxTabPage",
-                Detect = DetectApUi013,
-                Fix = "Use conditional render (@if block) to include/exclude the DxTabPage element entirely.",
-                Reason = "DxTabs derives its tab strip from rendered children. Visible attribute doesn't work - omit the child instead."
-            },
-            new()
-            {
-                Id = "AP-BE-001",
-                Category = "Backend / Data",
-                Severity = "error",
-                Title = "FromSqlInterpolated with multi-result-set SPs",
-                Detect = DetectApBe001,
-                Fix = "Use raw SqlConnection / SqlDataReader with NextResult() pattern.",
-                Reason = "FromSqlInterpolated silently drops result sets 2+."
-            },
-            new()
-            {
-                Id = "AP-BE-002",
-                Category = "Backend / Data",
-                Severity = "error",
-                Title = "EF migration for ROW_VERSION columns (RD-1)",
-                Detect = DetectApBe002,
-                Fix = "Do NOT generate an EF migration for ROW_VERSION. Columns already exist in DB (reviewer added them). Map via [Timestamp] / .IsRowVersion() in EF config.",
-                Reason = "RD-1 resolved - migration would fail or duplicate."
-            },
-            new()
-            {
-                Id = "AP-BE-003",
-                Category = "Backend / Data",
-                Severity = "error",
-                Title = "Positional int cast for string-backed enums",
-                Detect = DetectApBe003,
-                Fix = "Use explicit string mapping. SubledgerApplicableTo stores \"AP\"/\"AR\" as strings, not integers.",
-                Reason = "Positional cast produces 0/1 instead of \"AP\"/\"AR\", corrupting data."
-            },
-            new()
-            {
-                Id = "AP-BE-004",
-                Category = "Backend / Data",
-                Severity = "warning",
-                Title = "Missing HasTrigger() in EF configuration",
-                Detect = DetectApBe004,
-                Fix = "Add .HasTrigger(\"TRG_FC_INS_<TABLE>\"), .HasTrigger(\"TRG_FC_UPD_<TABLE>\"), .HasTrigger(\"TRG_FC_DEL_<TABLE>\").",
-                Reason = "EF Core 9 without HasTrigger() throws 'trigger affects rowcount' exception."
-            },
-            new()
-            {
-                Id = "AP-BE-005",
-                Category = "Backend / Data",
-                Severity = "warning",
-                Title = "Missing sentinel-zero handling in nullable-required-FK mappers",
-                Detect = DetectApBe005,
-                Fix = "DTO->Entity: use `?? 0`. Entity->DTO: convert 0 back to null. Proto->DTO: check HasXxx.",
-                Reason = "Prevents zero-FK insertion violating referential integrity."
-            },
-            new()
-            {
-                Id = "AP-BE-006",
-                Category = "Backend / Data",
-                Severity = "warning",
-                Title = "Missing IsRowVersion() wiring",
-                Detect = DetectApBe006,
-                Fix = "Add .Property(e => e.RowVersion).IsRowVersion().",
-                Reason = "Required for optimistic concurrency."
-            },
-            new()
-            {
-                Id = "AP-BE-007",
-                Category = "Backend / Data",
-                Severity = "error",
-                Title = "Module-specific filters on shared ListComponents RPCs",
-                Detect = DetectApBe007,
-                Fix = "Create a module-local RPC. Do not modify shared ListComponents definitions.",
-                Reason = "Shared RPCs serve multiple consumers - module-specific params break others."
-            },
-            new()
-            {
-                Id = "AP-XC-001",
-                Category = "Cross-Cutting",
-                Severity = "warning",
-                Title = "Missing [Display(Name)] on enum values",
-                Detect = DetectApXc001,
-                Fix = "Add [Display(Name = \"...\")] attribute to every enum value.",
-                Reason = "Required for GetEnumDisplayName() in combo editors."
-            },
-            new()
-            {
-                Id = "AP-XC-002",
-                Category = "Cross-Cutting",
-                Severity = "warning",
-                Title = "Missing DisplayText partial-class extension",
-                Detect = DetectApXc002,
-                Fix = "Create partial-class extension: `string DisplayText => string.IsNullOrEmpty(<Name>) ? (<Code> ?? string.Empty) : $\"{<Code>} - {<Name>}\";`",
-                Reason = "Combo editors bind to DisplayText - without extension, runtime error."
-            },
-            new()
-            {
-                Id = "AP-XC-003",
-                Category = "Cross-Cutting",
-                Severity = "info",
-                Title = "Section references archetype without following conventions",
-                Detect = DetectApXc003,
-                Fix = "Cross-reference the archetype's documented patterns and ensure conventions are followed.",
-                Reason = "Archetypes define proven patterns; deviating introduces bugs."
-            },
-            new()
-            {
-                Id = "MIGR-US-001",
-                Category = "Migration / User Stories",
-                Severity = "error",
-                Title = "User story missing Description field",
-                Detect = DetectMigrUs001,
-                Fix = "Add a clear description of what the user story does. Example: '### Description\\nUsers can create a new invoice with line items and save it to the database.'",
-                Reason = "Claude orchestrator needs to understand what the feature does to generate accurate migration plan."
-            },
-            new()
-            {
-                Id = "MIGR-US-002",
-                Category = "Migration / User Stories",
-                Severity = "error",
-                Title = "User story missing Phase assignment",
-                Detect = DetectMigrUs002,
-                Fix = "Add phase assignment. Example: '### Phase\\nPhase 1 (Immediate)' or 'Phase 2 (Follow-up)'.",
-                Reason = "Migration must be phased; orchestrator needs to know execution order and dependency management."
-            },
-            new()
-            {
-                Id = "MIGR-US-003",
-                Category = "Migration / User Stories",
-                Severity = "error",
-                Title = "User story missing Complexity assessment",
-                Detect = DetectMigrUs003,
-                Fix = "Add complexity level. Example: '### Complexity\\nMedium - Requires 3-5 days, moderate business logic, standard data mapping.'",
-                Reason = "Team capacity planning and risk assessment depend on accurate complexity estimates."
-            },
-            new()
-            {
-                Id = "MIGR-US-004",
-                Category = "Migration / User Stories",
-                Severity = "error",
-                Title = "User story missing Current Tech documentation",
-                Detect = DetectMigrUs004,
-                Fix = "Document current implementation. Example: '### Current Tech\\nWinForms with DevExpress GridControl, SQL Server stored procedures for validation.'",
-                Reason = "Orchestrator must understand existing implementation to plan accurate replacement."
-            },
-            new()
-            {
-                Id = "MIGR-US-005",
-                Category = "Migration / User Stories",
-                Severity = "error",
-                Title = "User story missing Target Tech documentation",
-                Detect = DetectMigrUs005,
-                Fix = "Document target implementation. Example: '### Target Tech\\nBlazer DataGrid, gRPC service with validation, EF Core entity mapping.'",
-                Reason = "Orchestrator needs to know architecture decisions to generate development tasks."
-            },
-            new()
-            {
-                Id = "MIGR-US-006",
-                Category = "Migration / User Stories",
-                Severity = "warning",
-                Title = "User story missing Acceptance Criteria",
-                Detect = DetectMigrUs006,
-                Fix = "Add acceptance criteria. Example: '### Acceptance Criteria\\n- Can enter invoice data and save\\n- Validation matches legacy behavior\\n- Handles edge cases (negative amounts, duplicate line items)'.",
-                Reason = "Teams need explicit criteria to determine when migration is complete."
-            },
-            new()
-            {
-                Id = "MIGR-US-007",
-                Category = "Migration / User Stories",
-                Severity = "warning",
-                Title = "User story missing Edge Cases documentation",
-                Detect = DetectMigrUs007,
-                Fix = "Document edge cases. Example: '### Edge Cases\\n- Null values in optional fields\\n- Concurrent edits (optimistic locking)\\n- Maximum invoice size limits.'",
-                Reason = "Edge cases often cause migration delays; explicit documentation prevents surprises."
-            },
-            new()
-            {
-                Id = "MIGR-US-008",
-                Category = "Migration / User Stories",
-                Severity = "info",
-                Title = "User story missing Risk Assessment",
-                Detect = DetectMigrUs008,
-                Fix = "Document risks. Example: '### Risks\\n- DevExpress Blazor GridControl API differs from WinForms\\n- Data sync complexity during parallel run'.",
-                Reason = "Risk assessment helps orchestrator suggest mitigation strategies."
-            },
-            // Module Migration Validation Rules (TIER 2)
-            new()
-            {
-                Id = "MIGR-MOD-001",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Scope definition",
-                Detect = DetectMigrMod001,
-                Fix = "Add '## Scope' or '### Scope' section listing what IS included and what is EXCLUDED from this module migration.",
-                Reason = "Orchestrator needs clear module boundaries to generate accurate implementation plan."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-002",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Success Criteria",
-                Detect = DetectMigrMod002,
-                Fix = "Add '## Success Criteria' section with testable/measurable criteria (functional, performance, cutover).",
-                Reason = "Objective completion criteria enable go/no-go cutover decisions."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-003",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Current Tech Stack",
-                Detect = DetectMigrMod003,
-                Fix = "Add '## Current Tech Stack' section listing platform (WinForms/WPF), frameworks (DevExpress versions), and data access pattern.",
-                Reason = "Orchestrator must understand legacy architecture to plan equivalent modern implementation."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-004",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Stored Procedure Inventory",
-                Detect = DetectMigrMod004,
-                Fix = "Add '## Stored Procedure Inventory' section listing all SPs with purpose, parameters, result sets, and business logic.",
-                Reason = "SPs contain validation rules that must transfer to modern layers (gRPC, EF, UI)."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-005",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Business Rule Consolidation",
-                Detect = DetectMigrMod005,
-                Fix = "Add '## Business Rule Consolidation' section listing all 50+ validation rules with current enforcement layer and modern owner (UI/API/EF/DB).",
-                Reason = "Rules scattered across layers are fragile; consolidation improves reliability and prevents silent failures."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-006",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Regression Test Scenarios",
-                Detect = DetectMigrMod006,
-                Fix = "Add '## Regression Test Catalog' section with 60+ test scenarios including scenario, inputs, expected outputs, and test level.",
-                Reason = "Tests define the behavioral contract; orchestrator uses them to understand feature complexity."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-007",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Test Classification Levels",
-                Detect = DetectMigrMod007,
-                Fix = "Add test coverage matrix classifying tests by level (UI, Domain, API, DB, E2E) with count and percentage of total.",
-                Reason = "Test level distribution indicates code quality; ensures comprehensive coverage (not just UI-level tests)."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-008",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Form Lifecycle States",
-                Detect = DetectMigrMod008,
-                Fix = "Add '## Form Lifecycle' or '## State Transition Matrix' section defining states (Load, Edit, Validate, Save, Close) and transitions.",
-                Reason = "Form state machine drives UI behavior (enable/disable); orchestrator uses this to generate PageModel event handlers."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-009",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Field Dependency Matrix",
-                Detect = DetectMigrMod009,
-                Fix = "Add field enabling rules matrix showing which fields enable/disable based on other field values (conditional logic).",
-                Reason = "Complex enabling rules are easy to miss; table format ensures all conditional logic is documented."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-010",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Legacy-to-Modern Field Mapping",
-                Detect = DetectMigrMod010,
-                Fix = "Add '## Field-to-Domain Mapping' table mapping legacy columns → modern entity properties (1:1), including data type conversions.",
-                Reason = "Prevents data loss; EF entity configuration depends on correct mapping."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-011",
-                Category = "Migration / Module Specification",
-                Severity = "error",
-                Title = "Module specification missing Validation Ownership Matrix",
-                Detect = DetectMigrMod011,
-                Fix = "Add validation ownership table showing which layer owns each rule (UI, gRPC, EF, DB). Ensure no rule left without modern owner.",
-                Reason = "Clear ownership prevents validation inconsistencies and silent failures."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-012",
-                Category = "Migration / Module Specification",
-                Severity = "warning",
-                Title = "Module specification missing Test Traceability Markers",
-                Detect = DetectMigrMod012,
-                Fix = "Add test case IDs (TC-001 format) and code↔test cross-references so developers know which tests validate each component.",
-                Reason = "Without traceability, developers don't know which tests to run after code changes."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-013",
-                Category = "Migration / Module Specification",
-                Severity = "warning",
-                Title = "Module specification missing Deployment Strategy",
-                Detect = DetectMigrMod013,
-                Fix = "Add '## Deployment Strategy' section describing parallel run approach, cutover steps (old+new→new only), and rollback plan.",
-                Reason = "Risk management depends on clear cutover and rollback procedures."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-014",
-                Category = "Migration / Module Specification",
-                Severity = "warning",
-                Title = "Module specification missing Database Schema Compatibility",
-                Detect = DetectMigrMod014,
-                Fix = "Add '## Database Schema Compatibility' section confirming EF entities map 1:1 to existing tables (no migrations needed).",
-                Reason = "Prevents expensive data migrations; allows gradual cutover with old+new running simultaneously."
-            },
-            new()
-            {
-                Id = "MIGR-MOD-015",
-                Category = "Migration / Module Specification",
-                Severity = "info",
-                Title = "Module specification missing Performance Targets",
-                Detect = DetectMigrMod015,
-                Fix = "Add '## Performance Targets' section specifying measurable SLAs (grid load time, gRPC latency, save operation, etc.).",
-                Reason = "Performance targets provide go/no-go cutover decision criteria."
-            }
-        };
-
-        return ClassifyRules(rules);
-    }
-
-    private static IReadOnlyList<AntipatternRule> ClassifyRules(IReadOnlyList<AntipatternRule> rules)
-    {
-        return rules
-            .Select(rule =>
-            {
-                var profile = RuleProfile.Any;
-                if (rule.Id.StartsWith("AP-", StringComparison.OrdinalIgnoreCase))
-                {
-                    profile = RuleProfile.Code;
-                }
-                else if (rule.Id.StartsWith("MIGR-US-", StringComparison.OrdinalIgnoreCase))
-                {
-                    profile = RuleProfile.UserStory;
-                }
-                else if (rule.Id.StartsWith("MIGR-MOD-", StringComparison.OrdinalIgnoreCase))
-                {
-                    profile = RuleProfile.ModuleSpec;
-                }
-
-                return new AntipatternRule
-                {
-                    Id = rule.Id,
-                    Category = rule.Category,
-                    Severity = rule.Severity,
-                    Title = rule.Title,
-                    Profile = profile,
-                    Detect = rule.Detect,
-                    Fix = rule.Fix,
-                    Reason = rule.Reason
-                };
-            })
-            .ToList();
-    }
-
-    private static List<RuleMatch> DetectApUi001(string content)
-    {
-        return RegexMatches(content, "FilterFieldNames");
-    }
-
-    private static List<RuleMatch> DetectApUi002(string content)
-    {
-        var results = new List<RuleMatch>();
-        var templateRegex = new Regex("<CellDisplayTemplate>", RegexOptions.IgnoreCase);
-        var columnRegex = new Regex("<DxGridDataColumn\\b[^>]*>", RegexOptions.IgnoreCase);
-        var fieldRegex = new Regex("FieldName\\s*=\\s*(?:\"([^\"]+)\"|'([^']+)')", RegexOptions.IgnoreCase);
-        var readOnlyRegex = new Regex("ReadOnly\\s*=\\s*(?:\"true\"|'true')", RegexOptions.IgnoreCase);
-
-        foreach (Match templateMatch in templateRegex.Matches(content))
-        {
-            var before = content[..templateMatch.Index];
-            var columns = columnRegex.Matches(before);
-            if (columns.Count == 0)
-            {
-                continue;
-            }
-
-            var nearestColumn = columns[^1];
-            var columnTag = nearestColumn.Value;
-            var fieldMatch = fieldRegex.Match(columnTag);
-            if (!fieldMatch.Success)
-            {
-                continue;
-            }
-
-            var fieldValue = fieldMatch.Groups[1].Success
-                ? fieldMatch.Groups[1].Value
-                : fieldMatch.Groups[2].Value;
-
-            fieldValue = fieldValue.Replace("@nameof(", string.Empty, StringComparison.OrdinalIgnoreCase).Trim(')', '"', '\'', ' ');
-
-            var isFkCandidate =
-                fieldValue.Contains("Code", StringComparison.OrdinalIgnoreCase) ||
-                fieldValue.Contains("Id", StringComparison.OrdinalIgnoreCase) ||
-                fieldValue.Contains("Number", StringComparison.OrdinalIgnoreCase);
-
-            var isReadOnly = readOnlyRegex.IsMatch(columnTag);
-            var isClosed = fieldValue.Equals("IsClosed", StringComparison.OrdinalIgnoreCase);
-
-            if (isFkCandidate && !isReadOnly && !isClosed)
-            {
-                results.Add(BuildMatch(content, templateMatch.Index, templateMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApUi003(string content)
-    {
-        var results = new List<RuleMatch>();
-        var blocks = GetComboSettingsBlocks(content);
-        foreach (var block in blocks)
-        {
-            var hasColumns = Regex.IsMatch(block.Text, "<Columns>", RegexOptions.IgnoreCase);
-            var hasEditFormat = Regex.IsMatch(block.Text, "<EditFormat>", RegexOptions.IgnoreCase);
-            if (hasColumns && !hasEditFormat)
-            {
-                results.Add(BuildMatch(content, block.Index, block.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApUi004(string content)
-    {
-        var results = new List<RuleMatch>();
-        var sortMatches = Regex.Matches(content, "SortIndex", RegexOptions.IgnoreCase);
-        var focusedMatches = Regex.Matches(content, "FocusedRowEnabled\\s*=\\s*\"true\"", RegexOptions.IgnoreCase);
-        if (sortMatches.Count == 0 || focusedMatches.Count == 0)
-        {
-            return results;
-        }
-
-        foreach (Match sort in sortMatches)
-        {
-            var nearFocused = focusedMatches.Cast<Match>().Any(f => Math.Abs(f.Index - sort.Index) <= 2000);
-            if (nearFocused)
-            {
-                results.Add(BuildMatch(content, sort.Index, sort.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApUi005(string content)
-    {
-        var results = new List<RuleMatch>();
-        var customizeMatches = Regex.Matches(content, "CustomizeElement", RegexOptions.IgnoreCase).Cast<Match>().ToList();
-        var wrapperMatches = Regex.Matches(content, "XpedeonCrudGrid", RegexOptions.IgnoreCase).Cast<Match>().ToList();
-
-        foreach (var customize in customizeMatches)
-        {
-            var nearWrapper = wrapperMatches.Any(wrapper => Math.Abs(wrapper.Index - customize.Index) <= 500);
-            if (nearWrapper)
-            {
-                results.Add(BuildMatch(content, customize.Index, customize.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApUi006(string content)
-    {
-        var results = new List<RuleMatch>();
-        var gridMatches = Regex.Matches(content, "<DxGrid\\b[^>]*>", RegexOptions.IgnoreCase);
-        var crudSignals = new[]
-        {
-            "EditModelSaving",
-            "EditNewRowPosition",
-            "CustomizeEditModel",
-            "UnsavedChanges",
-            "OnDelete"
-        };
-
-        foreach (Match gridMatch in gridMatches)
-        {
-            var windowLength = Math.Min(3000, content.Length - gridMatch.Index);
-            var block = content.Substring(gridMatch.Index, windowLength);
-            var hasCrudSignal = crudSignals.Any(signal => block.Contains(signal, StringComparison.OrdinalIgnoreCase));
-            if (!hasCrudSignal)
-            {
-                continue;
-            }
-
-            var hasShowAllRows = block.Contains("ShowAllRows=\"true\"", StringComparison.OrdinalIgnoreCase);
-            var hasEditModelSaving = block.Contains("EditModelSaving", StringComparison.OrdinalIgnoreCase);
-            if (hasShowAllRows && !hasEditModelSaving)
-            {
-                continue;
-            }
-
-            results.Add(BuildMatch(content, gridMatch.Index, gridMatch.Length));
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApUi007(string content)
-    {
-        return RegexMatches(content, @"FormModel\.(Headers|Accounts|EntityRoleLinks)\s*=\s*");
-    }
-
-    private static List<RuleMatch> DetectApUi008(string content)
-    {
-        var results = new List<RuleMatch>();
-        var blocks = GetComboSettingsBlocks(content);
-        foreach (var block in blocks)
-        {
-            var hasValueField = Regex.IsMatch(block.Text, "ValueFieldName\\s*=", RegexOptions.IgnoreCase);
-            var hasDisplayText = Regex.IsMatch(block.Text, "TextFieldName\\s*=\\s*(?:\"DisplayText\"|'DisplayText')", RegexOptions.IgnoreCase);
-            if (hasValueField && !hasDisplayText)
-            {
-                results.Add(BuildMatch(content, block.Index, block.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApUi009(string content)
-    {
-        var results = new List<RuleMatch>();
-        var blockRegex = new Regex("<CellEditTemplate\\b[^>]*>([\\s\\S]*?)</CellEditTemplate>", RegexOptions.IgnoreCase);
-        var comboRegex = new Regex("<DxComboBox\\b(?!Settings)[^>]*>", RegexOptions.IgnoreCase);
-
-        foreach (Match blockMatch in blockRegex.Matches(content))
-        {
-            var blockText = blockMatch.Value;
-            foreach (Match comboMatch in comboRegex.Matches(blockText))
-            {
-                var hasFlag = Regex.IsMatch(comboMatch.Value, "EnableValidation\\s*=\\s*(?:\"false\"|'false')", RegexOptions.IgnoreCase);
-                if (!hasFlag)
-                {
-                    var absoluteIndex = blockMatch.Index + comboMatch.Index;
-                    results.Add(BuildMatch(content, absoluteIndex, comboMatch.Length));
-                }
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApUi010(string content)
-    {
-        return RegexMatches(content, "CaptionPosition\\.Horizontal");
-    }
-
-    private static List<RuleMatch> DetectApUi011(string content)
-    {
-        return RegexMatches(content, "ColSpanMd");
-    }
-
-    private static List<RuleMatch> DetectApUi012(string content)
-    {
-        return RegexMatches(content, "(?<!Edit)NewItemRowPosition\\b");
-    }
-
-    private static List<RuleMatch> DetectApUi013(string content)
-    {
-        return RegexMatches(content, "<DxTabPage[^>]*\\bVisible\\s*=");
-    }
-
-    private static List<RuleMatch> DetectApBe001(string content)
-    {
-        var fromSqlMatches = Regex.Matches(content, "FromSqlInterpolated|FromSqlRaw", RegexOptions.IgnoreCase);
-        if (fromSqlMatches.Count == 0)
-        {
-            return new List<RuleMatch>();
-        }
-
-        var hasMultiResultSignal = Regex.IsMatch(
-            content,
-            "SPN_FC_GET_SUBLEDGER_TYPE|multi-result|NextResult|3 result sets|multiple result",
-            RegexOptions.IgnoreCase);
-
-        if (!hasMultiResultSignal)
-        {
-            return new List<RuleMatch>();
-        }
-
-        return fromSqlMatches.Cast<Match>().Select(m => BuildMatch(content, m.Index, m.Length)).ToList();
-    }
-
-    private static List<RuleMatch> DetectApBe002(string content)
-    {
-        var normalized = content.ToLowerInvariant();
-        var hasMigration = normalized.Contains("migration");
-        var hasRowVersion = normalized.Contains("row_version");
-        var hasExemption =
-            normalized.Contains("already present") ||
-            normalized.Contains("already added") ||
-            normalized.Contains("removed") ||
-            normalized.Contains("no migration required");
-
-        if (hasMigration && hasRowVersion && !hasExemption)
-        {
-            var index = normalized.IndexOf("row_version", StringComparison.Ordinal);
-            if (index < 0)
-            {
-                index = normalized.IndexOf("migration", StringComparison.Ordinal);
-            }
-            return new List<RuleMatch> { BuildMatch(content, Math.Max(0, index), 20) };
-        }
-
-        return new List<RuleMatch>();
-    }
-
-    private static List<RuleMatch> DetectApBe003(string content)
-    {
-        return RegexMatches(content, @"\(int\)\s*(SubledgerApplicableTo|ApplicableTo)|SubledgerApplicableTo.*\(int\)");
-    }
-
-    private static List<RuleMatch> DetectApBe004(string content)
-    {
-        var results = new List<RuleMatch>();
-        var toTableRegex = new Regex("\\.ToTable\\(\"(?<table>FC_SUBLEDGER_TYPE|FC_SUB_LED_ACCOUNT|FC_SUBLEDGER_ENTITY_ROLES)\"\\)", RegexOptions.IgnoreCase);
-        foreach (Match match in toTableRegex.Matches(content))
-        {
-            var start = Math.Max(0, match.Index - 380);
-            var length = Math.Min(content.Length - start, 760);
-            var snippet = content.Substring(start, length);
-            var hasTrigger = Regex.IsMatch(snippet, "HasTrigger", RegexOptions.IgnoreCase);
-            if (!hasTrigger)
-            {
-                results.Add(BuildMatch(content, match.Index, match.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApBe005(string content)
-    {
-        var hasTargetField = Regex.IsMatch(content, "CostAccountLineNumber|CostCode|EntityRoleNo", RegexOptions.IgnoreCase);
-        var hasMapperContext = Regex.IsMatch(content, "\\bmapper\\b|\\bmap\\b", RegexOptions.IgnoreCase);
-        var hasSentinelHandling = Regex.IsMatch(content, @"\?\?\s*0|\bHas[A-Za-z0-9_]*\b|\bhas_[A-Za-z0-9_]+\b", RegexOptions.IgnoreCase);
-
-        if (hasTargetField && hasMapperContext && !hasSentinelHandling)
-        {
-            var idx = Regex.Match(content, "CostAccountLineNumber|CostCode|EntityRoleNo", RegexOptions.IgnoreCase).Index;
-            return new List<RuleMatch> { BuildMatch(content, idx, 24) };
-        }
-
-        return new List<RuleMatch>();
-    }
-
-    private static List<RuleMatch> DetectApBe006(string content)
-    {
-        var hasRowVersion = Regex.IsMatch(content, "RowVersion|ROW_VERSION", RegexOptions.IgnoreCase);
-        var hasConfigContext = Regex.IsMatch(content, "Configuration|IEntityTypeConfiguration", RegexOptions.IgnoreCase);
-        var hasIsRowVersion = Regex.IsMatch(content, "IsRowVersion\\s*\\(\\s*\\)", RegexOptions.IgnoreCase);
-        var hasPropertyRowVersion = Regex.IsMatch(content, "\\.Property\\s*\\(.*RowVersion", RegexOptions.IgnoreCase);
-
-        if (hasRowVersion && hasConfigContext && !hasIsRowVersion && !hasPropertyRowVersion)
-        {
-            var idx = Regex.Match(content, "RowVersion|ROW_VERSION", RegexOptions.IgnoreCase).Index;
-            return new List<RuleMatch> { BuildMatch(content, idx, 20) };
-        }
-
-        return new List<RuleMatch>();
-    }
-
-    private static List<RuleMatch> DetectApBe007(string content)
-    {
-        var results = new List<RuleMatch>();
-        var paragraphs = Regex.Split(content, @"\r?\n\s*\r?\n");
-        var rpcPattern = "Get_AllChartOfAccountsList|Get_AllEntityRoles|Get_AllInternalEntities";
-        var changePattern = "add parameter|add filter|modify|extend";
-        var offset = 0;
-
-        foreach (var paragraph in paragraphs)
-        {
-            if (Regex.IsMatch(paragraph, rpcPattern, RegexOptions.IgnoreCase) &&
-                Regex.IsMatch(paragraph, changePattern, RegexOptions.IgnoreCase))
-            {
-                var idx = content.IndexOf(paragraph, offset, StringComparison.Ordinal);
-                if (idx < 0)
-                {
-                    idx = offset;
-                }
-                results.Add(BuildMatch(content, idx, Math.Min(30, paragraph.Length)));
-            }
-
-            offset += paragraph.Length + 1;
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApXc001(string content)
-    {
-        var results = new List<RuleMatch>();
-        var enumRegex = new Regex(@"enum\s+\w+\s*\{[\s\S]*?\}", RegexOptions.IgnoreCase);
-        foreach (Match enumMatch in enumRegex.Matches(content))
-        {
-            var hasDisplay = Regex.IsMatch(enumMatch.Value, @"\[Display\s*\(\s*Name", RegexOptions.IgnoreCase);
-            if (!hasDisplay)
-            {
-                results.Add(BuildMatch(content, enumMatch.Index, enumMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApXc002(string content)
-    {
-        var results = new List<RuleMatch>();
-        var matches = Regex.Matches(content, "TextFieldName\\s*=\\s*(?:\"DisplayText\"|'DisplayText')", RegexOptions.IgnoreCase);
-        if (matches.Count == 0)
-        {
-            return results;
-        }
-
-        var hasExtension = Regex.IsMatch(content, "DisplayText\\s*=>|Extensions", RegexOptions.IgnoreCase);
-        if (!hasExtension)
-        {
-            foreach (Match match in matches)
-            {
-                results.Add(BuildMatch(content, match.Index, match.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectApXc003(string content)
-    {
-        var archetypes = new[]
-        {
-            "ContractPayOthElementsPage",
-            "SecurityRoleConfiguration",
-            "MemorandumAccountTypesPage"
-        };
-
-        var results = new List<RuleMatch>();
-        foreach (var archetype in archetypes)
-        {
-            foreach (Match match in Regex.Matches(content, Regex.Escape(archetype), RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, match.Index, match.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrUs001(string content)
-    {
-        var results = new List<RuleMatch>();
-        var userStoryPattern = new Regex(@"^###\s+(?:US|UUS|U)-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-        foreach (Match usMatch in userStoryPattern.Matches(content))
-        {
-            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
-            if (nextUsIndex < 0) nextUsIndex = content.Length;
-
-            var usBlock = content[usMatch.Index..nextUsIndex];
-            if (!Regex.IsMatch(usBlock, @"###\s+description", RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrUs002(string content)
-    {
-        var results = new List<RuleMatch>();
-        var userStoryPattern = new Regex(@"^###\s+(?:US|UUS|U)-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-        foreach (Match usMatch in userStoryPattern.Matches(content))
-        {
-            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
-            if (nextUsIndex < 0) nextUsIndex = content.Length;
-
-            var usBlock = content[usMatch.Index..nextUsIndex];
-            if (!Regex.IsMatch(usBlock, @"###\s+phase", RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrUs003(string content)
-    {
-        var results = new List<RuleMatch>();
-        var userStoryPattern = new Regex(@"^###\s+(?:US|UUS|U)-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-        foreach (Match usMatch in userStoryPattern.Matches(content))
-        {
-            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
-            if (nextUsIndex < 0) nextUsIndex = content.Length;
-
-            var usBlock = content[usMatch.Index..nextUsIndex];
-            if (!Regex.IsMatch(usBlock, @"###\s+complexity", RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrUs004(string content)
-    {
-        var results = new List<RuleMatch>();
-        var userStoryPattern = new Regex(@"^###\s+(?:US|UUS|U)-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-        foreach (Match usMatch in userStoryPattern.Matches(content))
-        {
-            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
-            if (nextUsIndex < 0) nextUsIndex = content.Length;
-
-            var usBlock = content[usMatch.Index..nextUsIndex];
-            if (!Regex.IsMatch(usBlock, @"###\s+current\s+tech", RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrUs005(string content)
-    {
-        var results = new List<RuleMatch>();
-        var userStoryPattern = new Regex(@"^###\s+(?:US|UUS|U)-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-        foreach (Match usMatch in userStoryPattern.Matches(content))
-        {
-            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
-            if (nextUsIndex < 0) nextUsIndex = content.Length;
-
-            var usBlock = content[usMatch.Index..nextUsIndex];
-            if (!Regex.IsMatch(usBlock, @"###\s+target\s+tech", RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrUs006(string content)
-    {
-        var results = new List<RuleMatch>();
-        var userStoryPattern = new Regex(@"^###\s+(?:US|UUS|U)-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-        foreach (Match usMatch in userStoryPattern.Matches(content))
-        {
-            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
-            if (nextUsIndex < 0) nextUsIndex = content.Length;
-
-            var usBlock = content[usMatch.Index..nextUsIndex];
-            if (!Regex.IsMatch(usBlock, @"###\s+acceptance\s+criteria", RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrUs007(string content)
-    {
-        var results = new List<RuleMatch>();
-        var userStoryPattern = new Regex(@"^###\s+(?:US|UUS|U)-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-        foreach (Match usMatch in userStoryPattern.Matches(content))
-        {
-            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
-            if (nextUsIndex < 0) nextUsIndex = content.Length;
-
-            var usBlock = content[usMatch.Index..nextUsIndex];
-            if (!Regex.IsMatch(usBlock, @"###\s+edge\s+cases", RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrUs008(string content)
-    {
-        var results = new List<RuleMatch>();
-        var userStoryPattern = new Regex(@"^###\s+(?:US|UUS|U)-\d+.*$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-
-        foreach (Match usMatch in userStoryPattern.Matches(content))
-        {
-            var nextUsIndex = content.IndexOf("\n### ", usMatch.Index + 1, StringComparison.OrdinalIgnoreCase);
-            if (nextUsIndex < 0) nextUsIndex = content.Length;
-
-            var usBlock = content[usMatch.Index..nextUsIndex];
-            if (!Regex.IsMatch(usBlock, @"###\s+risks?", RegexOptions.IgnoreCase))
-            {
-                results.Add(BuildMatch(content, usMatch.Index, usMatch.Length));
-            }
-        }
-
-        return results;
-    }
-
-    // Module Migration Validation Detection Methods (TIER 2)
-    private static List<RuleMatch> DetectMigrMod001(string content)
-    {
-        return HasSection(content, @"##\s+scope|###\s+scope") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod002(string content)
-    {
-        return HasSection(content, @"##\s+success\s+criteria|###\s+success\s+criteria") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod003(string content)
-    {
-        return HasSection(content, @"##\s+current\s+tech|###\s+current\s+tech") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod004(string content)
-    {
-        return HasSection(content, @"##\s+stored\s+procedure|###\s+stored\s+procedure|##\s+sp\s+inventory|###\s+sp\s+inventory") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod005(string content)
-    {
-        return HasSection(content, @"##\s+business\s+rule|###\s+business\s+rule") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod006(string content)
-    {
-        return HasSection(content, @"##\s+regression\s+test|###\s+regression\s+test|##\s+test\s+catalog|###\s+test\s+catalog") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod007(string content)
-    {
-        return HasSection(content, @"test\s+coverage\s+by\s+level|level\s+classification|test\s+level") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod008(string content)
-    {
-        return HasSection(content, @"##\s+form\s+lifecycle|###\s+form\s+lifecycle|##\s+state\s+transition|###\s+state\s+transition") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod009(string content)
-    {
-        return HasSection(content, @"field\s+dependency|field\s+enabling") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod010(string content)
-    {
-        return HasSection(content, @"##\s+field.*mapping|###\s+field.*mapping|##\s+legacy.*domain|###\s+legacy.*domain") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod011(string content)
-    {
-        return HasSection(content, @"validation\s+ownership|ownership\s+matrix") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod012(string content)
-    {
-        var results = new List<RuleMatch>();
-        var hasTraceability = HasSection(content, @"test\s+id|test\s+case\s+id|tc-\d+|traceability");
-        var hasTestSection = HasSection(content, @"##\s+test|###\s+test");
-
-        if (hasTestSection && !hasTraceability)
-        {
-            results.Add(BuildMatch(content, 0, Math.Min(100, content.Length)));
-        }
-
-        return results;
-    }
-
-    private static List<RuleMatch> DetectMigrMod013(string content)
-    {
-        return HasSection(content, @"##\s+deployment|###\s+deployment|##\s+parallel\s+run|###\s+parallel\s+run") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod014(string content)
-    {
-        return HasSection(content, @"##\s+database|###\s+database|schema\s+compatibility|ef\s+mapping") ? new() : FindDocumentStart(content);
-    }
-
-    private static List<RuleMatch> DetectMigrMod015(string content)
-    {
-        var results = new List<RuleMatch>();
-        var hasPerformance = HasSection(content, @"##\s+performance|###\s+performance|performance\s+target|sla");
-
-        if (!hasPerformance)
-        {
-            results.Add(BuildMatch(content, 0, Math.Min(100, content.Length)));
-        }
-
-        return results;
-    }
-
-    private static bool HasSection(string content, string pattern)
-    {
-        return Regex.IsMatch(content, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline);
-    }
-
-    private static List<RuleMatch> FindDocumentStart(string content)
-    {
-        var results = new List<RuleMatch>();
-        var match = Regex.Match(content, @"^#", RegexOptions.Multiline);
-        if (match.Success)
-        {
-            results.Add(BuildMatch(content, match.Index, match.Length));
-        }
-        else if (content.Length > 0)
-        {
-            results.Add(BuildMatch(content, 0, Math.Min(100, content.Length)));
-        }
-
-        return results;
-    }
-
-    private static List<(int Index, int Length, string Text)> GetComboSettingsBlocks(string content)
-    {
-        var blocks = new List<(int Index, int Length, string Text)>();
-        var startRegex = new Regex("<DxComboBoxSettings\\b[^>]*>", RegexOptions.IgnoreCase);
-        var starts = startRegex.Matches(content).Cast<Match>().ToList();
-        if (starts.Count == 0)
-        {
-            return blocks;
-        }
-
-        const string closeTag = "</DxComboBoxSettings>";
-        for (var i = 0; i < starts.Count; i++)
-        {
-            var start = starts[i].Index;
-            var nextStart = i + 1 < starts.Count ? starts[i + 1].Index : content.Length;
-            var closeIndex = content.IndexOf(closeTag, start, StringComparison.OrdinalIgnoreCase);
-            var end = closeIndex >= 0 && closeIndex < nextStart
-                ? closeIndex + closeTag.Length
-                : nextStart;
-
-            var length = Math.Max(0, end - start);
-            var text = length > 0 ? content.Substring(start, length) : string.Empty;
-            blocks.Add((start, length, text));
-        }
-
-        return blocks;
-    }
-
-    private static List<RuleMatch> RegexMatches(string content, string pattern)
-    {
-        return Regex.Matches(content, pattern, RegexOptions.IgnoreCase)
-            .Cast<Match>()
-            .Select(match => BuildMatch(content, match.Index, match.Length))
-            .ToList();
-    }
-
-    private static RuleMatch BuildMatch(string content, int index, int matchLength)
-    {
-        var safeIndex = Math.Clamp(index, 0, Math.Max(0, content.Length - 1));
-        var safeLength = Math.Max(1, matchLength);
-        var snippet = BuildContextSnippet(content, safeIndex, safeLength);
-        var matched = content.Substring(safeIndex, Math.Min(safeLength, content.Length - safeIndex));
-
-        return new RuleMatch
-        {
-            Index = safeIndex,
-            Matched = matched,
-            Context = snippet
-        };
-    }
-
-    private static string BuildContextSnippet(string content, int index, int matchLength, int radius = 68)
-    {
-        if (string.IsNullOrEmpty(content))
-        {
-            return string.Empty;
-        }
-
-        var start = Math.Max(0, index - radius);
-        var end = Math.Min(content.Length, index + matchLength + radius);
-        var slice = content[start..end];
-        return Regex.Replace(slice, @"\s+", " ").Trim();
-    }
-
-    // ============================================================
-    // SECTION 4: REVISION PROMPT GENERATOR
-    // ============================================================
-    private string BuildRevisionPrompt()
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("The following violations were found in your implementation plan.");
-        sb.AppendLine("For each violation, the canonical fix is provided. Please revise the indicated sections:");
-        sb.AppendLine();
-
-        var totalViolations = 0;
-        var totalErrors = 0;
-        var totalWarnings = 0;
-        var totalInfo = 0;
-        var cleanSections = 0;
-        var sectionsNeedingRevision = new List<string>();
-
-        foreach (var section in Sections)
-        {
-            var violations = GetViolationsForSection(section.Id);
-            if (violations.Count == 0)
-            {
-                cleanSections++;
-                continue;
-            }
-
-            sb.AppendLine($"## Section {section.Letter} - {section.Heading}");
-            sectionsNeedingRevision.Add(section.Letter);
-            for (var i = 0; i < violations.Count; i++)
-            {
-                var violation = violations[i];
-                var severityUpper = violation.Severity.ToUpperInvariant();
-                var matchedSnippet = Truncate(violation.Matched, 80);
-
-                sb.AppendLine($"{i + 1}. **[{violation.RuleId}] {severityUpper}** - {violation.Title}");
-                sb.AppendLine($"   Matched: `{matchedSnippet}`");
-                sb.AppendLine($"   Fix: {violation.Fix}");
-                sb.AppendLine($"   Reason: {violation.Reason}");
-                sb.AppendLine();
-
-                totalViolations++;
-                if (IsSeverity(violation.Severity, "error"))
-                {
-                    totalErrors++;
-                }
-                else if (IsSeverity(violation.Severity, "warning"))
-                {
-                    totalWarnings++;
-                }
-                else if (IsSeverity(violation.Severity, "info"))
-                {
-                    totalInfo++;
-                }
-            }
-
-            sb.AppendLine();
-        }
-
-        sb.AppendLine("---");
-        sb.AppendLine();
-        sb.AppendLine("## Summary");
-        sb.AppendLine($"- Total violations: {totalViolations}");
-        sb.AppendLine($"- Errors: {totalErrors}");
-        sb.AppendLine($"- Warnings: {totalWarnings}");
-        sb.AppendLine($"- Info: {totalInfo}");
-        sb.AppendLine($"- Clean sections: {cleanSections} / {Sections.Count}");
-        sb.AppendLine($"- Sections needing revision: {(sectionsNeedingRevision.Count == 0 ? "None" : string.Join(", ", sectionsNeedingRevision.Distinct()))}");
-        return sb.ToString();
-    }
-
-    // ============================================================
-    // SECTION 5: UI COMPONENTS (panels, badges, modal)
-    // ============================================================
-    private static string TruncateForDisplay(string text, int maxLength)
-    {
-        return Truncate(text, maxLength);
-    }
-
-    private static string Truncate(string text, int maxLength)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return string.Empty;
-        }
-
-        var normalized = Regex.Replace(text.Trim(), @"\s+", " ");
-        return normalized.Length <= maxLength
-            ? normalized
-            : normalized[..maxLength].TrimEnd() + "...";
-    }
-
 }
+
