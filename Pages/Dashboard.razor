@@ -1,0 +1,184 @@
+@page "/"
+
+<PageTitle>Orchestrator Dashboard</PageTitle>
+
+<section class="dashboard-page">
+    <header class="dashboard-hero">
+        <div class="dashboard-hero__title">
+            <div class="dashboard-hero__topline">
+                <h1>Dashboard</h1>
+            </div>
+            <div class="dashboard-connection-pill dashboard-connection-pill--@ConnectionStatusCssClass">
+                <span class="dashboard-connection-pill__dot"></span>
+                <span>Azure DevOps</span>
+                <strong>@ConnectionStatus</strong>
+            </div>
+        </div>
+
+        <div class="dashboard-hero__actions">
+            <button type="button"
+                    class="dashboard-reload-button"
+                    @onclick="LoadStoriesAsync"
+                    disabled="@(!HasConnectionSettings || IsLoadingStories)">
+                @(IsLoadingStories ? "Reloading..." : "Reload")
+            </button>
+        </div>
+    </header>
+
+    <section class="dashboard-panel dashboard-panel--running @(IsRunningGridCollapsed ? "dashboard-panel--collapsed" : string.Empty)">
+        <div class="dashboard-panel__header">
+            <div>
+                <h2>Orchestrators Running</h2>
+                <p>Stories currently being processed by the orchestrator.</p>
+            </div>
+            <div class="dashboard-panel__header-actions">
+                <span class="dashboard-running__count">@RunningStories.Count</span>
+                <button type="button"
+                        class="dashboard-panel__toggle"
+                        @onclick="ToggleRunningGrid"
+                        aria-expanded="@(!IsRunningGridCollapsed)">
+                    @(IsRunningGridCollapsed ? "Expand" : "Collapse")
+                </button>
+            </div>
+        </div>
+
+        @if (!IsRunningGridCollapsed && RunningStories.Count == 0)
+        {
+            <div class="dashboard-empty dashboard-empty--compact">
+                <p>No stories are currently running in the orchestrator.</p>
+            </div>
+        }
+        else if (!IsRunningGridCollapsed)
+        {
+            <div class="dashboard-running-grid-wrap">
+                <table class="dashboard-table dashboard-table--running">
+                    <thead>
+                        <tr>
+                            <th>Story ID</th>
+                            <th>Title</th>
+                            <th>MFE</th>
+                            <th>Assigned To</th>
+                            <th>Execution Mode</th>
+                            <th>Orchestrator Phase</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var story in RunningStories)
+                        {
+                            <tr>
+                                <td>#@story.Id</td>
+                                <td>@story.Title</td>
+                                <td>@DisplayOrDash(story.Mfe)</td>
+                                <td>@DisplayOrDash(story.AssignedTo)</td>
+                                <td>@DisplayOrDash(story.ExecutionMode)</td>
+                                <td>@DisplayOrDash(story.OrchestratorPhase)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="dashboard-panel @(IsStoryTrackerCollapsed ? "dashboard-panel--collapsed" : string.Empty)">
+        <div class="dashboard-panel__header">
+            <div>
+                <h2>Story Tracker</h2>
+                <p>All tagged user stories with assignee, state, and orchestration status.</p>
+            </div>
+            <div class="dashboard-panel__header-actions">
+                <button type="button"
+                        class="dashboard-panel__toggle"
+                        @onclick="ToggleStoryTrackerGrid"
+                        aria-expanded="@(!IsStoryTrackerCollapsed)">
+                    @(IsStoryTrackerCollapsed ? "Expand" : "Collapse")
+                </button>
+            </div>
+        </div>
+
+        @if (!IsStoryTrackerCollapsed)
+        {
+        <div class="dashboard-toolbar">
+            <label class="dashboard-toolbar__search">
+                <span>Search</span>
+                <input @bind="SearchText" @bind:event="oninput" placeholder="Story ID, title, assignee, MFE, execution mode, phase" />
+            </label>
+            <label>
+                <span>State</span>
+                <select @bind="StateFilter">
+                    <option value="Any">Any</option>
+                    <option value="New">New</option>
+                    <option value="Active">Active</option>
+                    <option value="Coding In Progress">Coding In Progress</option>
+                    <option value="Resolved">Resolved</option>
+                    <option value="Closed">Closed</option>
+                    <option value="Testing Requested">Testing Requested</option>
+                </select>
+            </label>
+            <div class="dashboard-toolbar__meta">
+                <span>Stories: <strong>@Stories.Count</strong></span>
+                <span>Visible: <strong>@FilteredStories.Count</strong></span>
+            </div>
+        </div>
+
+        @if (FilteredStories.Count == 0)
+        {
+            <div class="dashboard-empty">
+                @if (IsLoadingStories)
+                {
+                    <p>Loading stories from Azure DevOps...</p>
+                }
+                else if (!HasConnectionSettings)
+                {
+                    <p>Azure DevOps configuration is unavailable.</p>
+                }
+                else
+                {
+                    <p>No stories match the current dashboard query or filters.</p>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="dashboard-table-wrap">
+                <table class="dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>Story ID</th>
+                            <th>Title</th>
+                            <th>Assigned To</th>
+                            <th>State</th>
+                            <th>MFE</th>
+                            <th>Execution Mode</th>
+                            <th>Orchestrator Phase</th>
+                            <th>Orchestrator Phase Updated</th>
+                            <th>Start Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var story in FilteredStories)
+                        {
+                            <tr>
+                                <td>#@story.Id</td>
+                                <td>@story.Title</td>
+                                <td>@DisplayOrDash(story.AssignedTo)</td>
+                                <td>@DisplayOrDash(story.State)</td>
+                                <td>@DisplayOrDash(story.Mfe)</td>
+                                <td>@DisplayOrDash(story.ExecutionMode)</td>
+                                <td>@DisplayOrDash(story.OrchestratorPhase)</td>
+                                <td>@FormatDateTime(story.OrchestratorPhaseUpdated)</td>
+                                <td>@FormatDate(story.StartDate)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(LoadError))
+        {
+            <p class="dashboard-error">@LoadError</p>
+        }
+        }
+    </section>
+</section>
