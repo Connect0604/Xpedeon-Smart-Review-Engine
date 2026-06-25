@@ -22,7 +22,8 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         string project,
         string patToken,
         string wiqlCondition,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeRevisionMetadata = false)
     {
         var baseUrl = $"https://dev.azure.com/{organization}/{project}/_apis/wit";
         using var wiqlRequest = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/wiql?api-version=7.1");
@@ -57,10 +58,29 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         workItemsResponse.EnsureSuccessStatusCode();
 
         var workItemsData = await workItemsResponse.Content.ReadFromJsonAsync<WorkItemsResponse>(JsonOptions, cancellationToken);
-        var stories = new List<DevOpsStoryItem>();
+        var items = workItemsData?.Value ?? new List<WorkItemDto>();
 
-        foreach (var item in workItemsData?.Value ?? new List<WorkItemDto>())
+        // Only fetch revision metadata if requested (saves 200+ API calls if not needed)
+        List<StoryRevisionMetadata> allRevisions = new();
+        if (includeRevisionMetadata && items.Count > 0)
         {
+            // Fetch all revision metadata in parallel instead of sequentially
+            var revisionTasks = items.Select(item =>
+                GetRevisionMetadataAsync(baseUrl, item.Id, patToken, cancellationToken));
+            allRevisions = (await Task.WhenAll(revisionTasks)).ToList();
+        }
+        else
+        {
+            // No revision metadata needed - create empty list
+            allRevisions = Enumerable.Range(0, items.Count).Select(_ => new StoryRevisionMetadata()).ToList();
+        }
+
+        var stories = new List<DevOpsStoryItem>();
+        for (int i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            var revisionMetadata = allRevisions[i];
+
             var workItemType = item.Fields.TryGetValue("System.WorkItemType", out var typeValue) ? typeValue?.ToString() ?? "Unknown" : "Unknown";
             var title = item.Fields.TryGetValue("System.Title", out var titleValue) ? titleValue?.ToString() ?? "(No title)" : "(No title)";
             var state = item.Fields.TryGetValue("System.State", out var stateValue) ? stateValue?.ToString() ?? "Unknown" : "Unknown";
@@ -92,8 +112,6 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 })
                 .ToList();
 
-            var revisionMetadata = await GetRevisionMetadataAsync(baseUrl, item.Id, patToken, cancellationToken);
-
             stories.Add(new DevOpsStoryItem
             {
                 Id = item.Id,
@@ -107,6 +125,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 StartDate = revisionMetadata.StartDate,
                 Mfe = mfe,
                 ExecutionMode = executionMode,
+                WorkItemUrl = $"https://dev.azure.com/{Uri.EscapeDataString(organization)}/{Uri.EscapeDataString(project)}/_workitems/edit/{item.Id}",
                 Attachments = attachments
             });
         }

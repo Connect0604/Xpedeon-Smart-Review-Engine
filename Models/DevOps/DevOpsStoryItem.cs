@@ -13,5 +13,6 @@ internal sealed class DevOpsStoryItem
     public DateTimeOffset? StartDate { get; init; }
     public string Mfe { get; init; } = string.Empty;
     public string ExecutionMode { get; init; } = string.Empty;
+    public string WorkItemUrl { get; init; } = string.Empty;
     public List<DevOpsAttachmentItem> Attachments { get; init; } = new();
 }

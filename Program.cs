@@ -9,8 +9,13 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
+builder.Services.AddHttpClient<IAzureDevOpsService, AzureDevOpsService>(client =>
+{
+    client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress);
+    client.Timeout = TimeSpan.FromMinutes(3); 
+});
+
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
-builder.Services.AddScoped<IAzureDevOpsService, AzureDevOpsService>();
 builder.Services.AddScoped<DevOpsDashboardState>();
 builder.Services.AddHttpClient<IOllamaService, OllamaService>(client =>
 {

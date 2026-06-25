@@ -5,7 +5,7 @@ using SmartReviewSystem.Services.DevOps;
 
 namespace SmartReviewSystem.Pages;
 
-public partial class Dashboard : ComponentBase
+public partial class Dashboard : ComponentBase, IAsyncDisposable
 {
     [Inject]
     private IAzureDevOpsService AzureDevOpsService { get; set; } = default!;
@@ -21,18 +21,21 @@ public partial class Dashboard : ComponentBase
     private string DevOpsPatToken = string.Empty;
     private string SearchText = string.Empty;
     private string StateFilter = "Any";
+    private string OrchestratorFilter = "Coding In Progress";
+    private string ActiveTab = "running";
     private string LoadError = string.Empty;
     private string ConnectionStatus = "Idle";
     private bool IsLoadingStories;
-    private bool IsRunningGridCollapsed;
-    private bool IsStoryTrackerCollapsed;
     private List<DevOpsStoryItem> Stories = new();
+    private PeriodicTimer? AutoReloadTimer;
+    private bool AutoReloadEnabled;
+    private int ReloadIntervalSeconds = 300;
 
     private List<DevOpsStoryItem> FilteredStories =>
         DevOpsDashboardStoryFilter.Apply(Stories, SearchText, StateFilter).ToList();
 
     private List<DevOpsStoryItem> RunningStories =>
-        DevOpsDashboardStoryFilter.GetRunningStories(Stories).ToList();
+        DevOpsDashboardStoryFilter.GetRunningStories(Stories, OrchestratorFilter).ToList();
 
     private bool HasConnectionSettings =>
         !string.IsNullOrWhiteSpace(DevOpsOrganization) &&
@@ -47,6 +50,11 @@ public partial class Dashboard : ComponentBase
         DevOpsOrganization = options.Organization;
         DevOpsProject = options.Project;
         DevOpsPatToken = options.PatToken;
+
+        var dashboardConfig = Configuration.GetSection("Dashboard").Get<DashboardOptions>() ?? new DashboardOptions();
+        AutoReloadEnabled = dashboardConfig.AutoReloadEnabled;
+        ReloadIntervalSeconds = dashboardConfig.ReloadIntervalSeconds > 0 ? dashboardConfig.ReloadIntervalSeconds : 300;
+
         if (!HasConnectionSettings)
         {
             ConnectionStatus = "Unavailable";
@@ -59,11 +67,17 @@ public partial class Dashboard : ComponentBase
             Stories = DashboardState.Stories.ToList();
             ConnectionStatus = DashboardState.ConnectionStatus;
             LoadError = DashboardState.LoadError;
-            return;
+        }
+        else
+        {
+            ConnectionStatus = "Connecting";
+            await LoadStoriesAsync();
         }
 
-        ConnectionStatus = "Connecting";
-        await LoadStoriesAsync();
+        if (AutoReloadEnabled)
+        {
+            StartAutoReload();
+        }
     }
 
     private async Task LoadStoriesAsync()
@@ -83,12 +97,15 @@ public partial class Dashboard : ComponentBase
 
         try
         {
+            // Load stories WITHOUT revision metadata for fast dashboard loading
+            // Revision metadata requires 200+ API calls and is not essential for status dashboard
             Stories = await AzureDevOpsService.GetStoriesWithAttachmentsAsync(
                 DevOpsOrganization.Trim(),
                 DevOpsProject.Trim(),
                 DevOpsPatToken.Trim(),
                 "[System.WorkItemType] = 'User Story' AND [System.Tags] CONTAINS 'AI development with revised orchestration'",
-                CancellationToken.None);
+                CancellationToken.None,
+                includeRevisionMetadata: false);
 
             ConnectionStatus = Stories.Count == 0 ? "No stories found" : "Connected";
             DashboardState.SetStories(Stories, ConnectionStatus);
@@ -110,15 +127,42 @@ public partial class Dashboard : ComponentBase
     private static string DisplayOrDash(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "-" : value;
 
-    private static string FormatDate(DateTimeOffset? value) =>
-        value?.ToLocalTime().ToString("dd MMM yyyy") ?? "-";
+    private void SetActiveTab(string tabName)
+    {
+        ActiveTab = tabName;
+    }
 
-    private static string FormatDateTime(DateTimeOffset? value) =>
-        value?.ToLocalTime().ToString("dd MMM yyyy HH:mm") ?? "-";
+    private void StartAutoReload()
+    {
+        AutoReloadTimer = new PeriodicTimer(TimeSpan.FromSeconds(ReloadIntervalSeconds));
+        _ = AutoReloadTickAsync();
+    }
 
-    private void ToggleRunningGrid() =>
-        IsRunningGridCollapsed = !IsRunningGridCollapsed;
+    private async Task AutoReloadTickAsync()
+    {
+        try
+        {
+            while (await AutoReloadTimer!.WaitForNextTickAsync())
+            {
+                await LoadStoriesAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Timer was disposed, this is expected
+        }
+    }
 
-    private void ToggleStoryTrackerGrid() =>
-        IsStoryTrackerCollapsed = !IsStoryTrackerCollapsed;
+    async ValueTask IAsyncDisposable.DisposeAsync()
+    {
+        AutoReloadTimer?.Dispose();
+        GC.SuppressFinalize(this);
+        await ValueTask.CompletedTask;
+    }
+}
+
+internal class DashboardOptions
+{
+    public bool AutoReloadEnabled { get; set; } = true;
+    public int ReloadIntervalSeconds { get; set; } = 300;
 }
