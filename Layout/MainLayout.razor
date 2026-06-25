@@ -1,5 +1,23 @@
 @inherits LayoutComponentBase
 
-<main class="main-host">
-    @Body
-</main>
+<div class="app-shell">
+    <aside class="app-shell__sidebar">
+        <div class="app-shell__brand">
+            <span class="app-shell__eyebrow">Xpedeon</span>
+            <strong>Smart Review Engine</strong>
+        </div>
+
+        <nav class="app-shell__nav" aria-label="Primary">
+            <NavLink href="/" Match="NavLinkMatch.All" class="app-shell__nav-link">
+                <span>Orchestrator Dashboard</span>
+            </NavLink>
+            <NavLink href="/review" class="app-shell__nav-link">
+                <span>Smart Review</span>
+            </NavLink>
+        </nav>
+    </aside>
+
+    <main class="app-shell__content">
+        @Body
+    </main>
+</div>

@@ -8,6 +8,10 @@ namespace SmartReviewSystem.Services.DevOps;
 
 internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsService
 {
+    private const string OrchestratorPhaseFieldName = "Custom.OrchestratorPhase";
+    private const string MfeFieldName = "Custom.Module";
+    private const string ExecutionModeFieldName = "Custom.ExecutionMode";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -62,7 +66,9 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             var state = item.Fields.TryGetValue("System.State", out var stateValue) ? stateValue?.ToString() ?? "Unknown" : "Unknown";
             var assigned = item.Fields.TryGetValue("System.AssignedTo", out var assignedValue) ? ExtractAssignedTo(assignedValue) : "Unassigned";
             var tags = item.Fields.TryGetValue("System.Tags", out var tagsValue) ? tagsValue?.ToString() ?? string.Empty : string.Empty;
-            var orchestratorPhase = item.Fields.TryGetValue("Custom.OrchestratorPhase", out var phaseValue) ? phaseValue?.ToString() ?? string.Empty : string.Empty;
+            var orchestratorPhase = item.Fields.TryGetValue(OrchestratorPhaseFieldName, out var phaseValue) ? phaseValue?.ToString() ?? string.Empty : string.Empty;
+            var mfe = item.Fields.TryGetValue(MfeFieldName, out var mfeValue) ? mfeValue?.ToString() ?? string.Empty : string.Empty;
+            var executionMode = item.Fields.TryGetValue(ExecutionModeFieldName, out var executionModeValue) ? executionModeValue?.ToString() ?? string.Empty : string.Empty;
 
             var attachments = (item.Relations ?? new List<RelationDto>())
                 .Where(r => string.Equals(r.Rel, "AttachedFile", StringComparison.OrdinalIgnoreCase))
@@ -86,6 +92,8 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 })
                 .ToList();
 
+            var revisionMetadata = await GetRevisionMetadataAsync(baseUrl, item.Id, patToken, cancellationToken);
+
             stories.Add(new DevOpsStoryItem
             {
                 Id = item.Id,
@@ -95,6 +103,10 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 AssignedTo = assigned,
                 Tags = tags,
                 OrchestratorPhase = orchestratorPhase,
+                OrchestratorPhaseUpdated = revisionMetadata.OrchestratorPhaseUpdated,
+                StartDate = revisionMetadata.StartDate,
+                Mfe = mfe,
+                ExecutionMode = executionMode,
                 Attachments = attachments
             });
         }
@@ -245,6 +257,91 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         return value.ToString() ?? "Unknown";
     }
 
+    private async Task<StoryRevisionMetadata> GetRevisionMetadataAsync(
+        string baseUrl,
+        int workItemId,
+        string patToken,
+        CancellationToken cancellationToken)
+    {
+        using var revisionsRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{baseUrl}/workItems/{workItemId}/revisions?api-version=7.1");
+        ApplyPatHeader(revisionsRequest, patToken);
+
+        using var revisionsResponse = await httpClient.SendAsync(revisionsRequest, cancellationToken);
+        revisionsResponse.EnsureSuccessStatusCode();
+
+        var revisionsData = await revisionsResponse.Content.ReadFromJsonAsync<RevisionsResponse>(JsonOptions, cancellationToken);
+        if (revisionsData?.Value is null || revisionsData.Value.Count == 0)
+        {
+            return new StoryRevisionMetadata();
+        }
+
+        string? previousState = null;
+        string? previousPhase = null;
+        DateTimeOffset? startDate = null;
+        DateTimeOffset? phaseUpdated = null;
+
+        foreach (var revision in revisionsData.Value)
+        {
+            var fields = revision.Fields;
+            var currentState = GetFieldString(fields, "System.State");
+            var currentPhase = GetFieldString(fields, OrchestratorPhaseFieldName);
+            var changedDate = GetFieldDate(fields, "System.ChangedDate");
+
+            if (startDate is null &&
+                changedDate is not null &&
+                string.Equals(currentState, "Coding In Progress", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(previousState, "Coding In Progress", StringComparison.OrdinalIgnoreCase))
+            {
+                startDate = changedDate;
+            }
+
+            if (!string.IsNullOrWhiteSpace(previousPhase) &&
+                !string.Equals(previousPhase, currentPhase, StringComparison.OrdinalIgnoreCase) &&
+                changedDate is not null)
+            {
+                phaseUpdated = changedDate;
+            }
+
+            previousState = currentState;
+            previousPhase = currentPhase;
+        }
+
+        return new StoryRevisionMetadata
+        {
+            StartDate = startDate,
+            OrchestratorPhaseUpdated = phaseUpdated
+        };
+    }
+
+    private static string GetFieldString(Dictionary<string, object?> fields, string fieldName)
+    {
+        return fields.TryGetValue(fieldName, out var value)
+            ? value?.ToString() ?? string.Empty
+            : string.Empty;
+    }
+
+    private static DateTimeOffset? GetFieldDate(Dictionary<string, object?> fields, string fieldName)
+    {
+        if (!fields.TryGetValue(fieldName, out var value) || value is null)
+        {
+            return null;
+        }
+
+        if (value is JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(element.GetString(), out var elementDate))
+            {
+                return elementDate;
+            }
+
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(value.ToString(), out var parsedDate) ? parsedDate : null;
+    }
+
     private sealed class WiqlResponse
     {
         public List<WiqlWorkItem> WorkItems { get; init; } = new();
@@ -267,10 +364,26 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         public List<RelationDto>? Relations { get; init; }
     }
 
+    private sealed class RevisionsResponse
+    {
+        public List<RevisionDto> Value { get; init; } = new();
+    }
+
+    private sealed class RevisionDto
+    {
+        public Dictionary<string, object?> Fields { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
     private sealed class RelationDto
     {
         public string? Rel { get; init; }
         public string? Url { get; init; }
         public Dictionary<string, object?>? Attributes { get; init; }
+    }
+
+    private sealed class StoryRevisionMetadata
+    {
+        public DateTimeOffset? StartDate { get; init; }
+        public DateTimeOffset? OrchestratorPhaseUpdated { get; init; }
     }
 }

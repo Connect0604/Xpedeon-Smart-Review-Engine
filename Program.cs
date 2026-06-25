@@ -11,6 +11,7 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 builder.Services.AddScoped<IAzureDevOpsService, AzureDevOpsService>();
+builder.Services.AddScoped<DevOpsDashboardState>();
 builder.Services.AddHttpClient<IOllamaService, OllamaService>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(5);
