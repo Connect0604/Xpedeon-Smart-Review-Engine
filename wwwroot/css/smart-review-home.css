@@ -413,7 +413,8 @@
     }
 
     .srs-app {
-        min-height: 100vh;
+        height: 100vh;
+        min-height: 0;
         display: flex;
         flex-direction: column;
     }
@@ -536,6 +537,7 @@
         min-height: 0;
         display: grid;
         grid-template-columns: 300px minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
     }
 
     .srs-left-panel {
@@ -707,6 +709,8 @@
 
     .srs-sections-list {
         margin-top: 0.7rem;
+        flex: 1;
+        min-height: 0;
         display: flex;
         flex-direction: column;
         gap: 0.2rem;
