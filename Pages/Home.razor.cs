@@ -33,6 +33,8 @@ public partial class Home : ComponentBase, IAsyncDisposable
     private LlmRoutingStrategy LlmStrategy { get; set; } = default!;
     [Inject]
     private ReviewOrchestrator Orchestrator { get; set; } = default!;
+    [Inject]
+    private DevOpsDashboardState DashboardState { get; set; } = default!;
 
     private enum SectionFilterMode
     {
@@ -316,12 +318,33 @@ public partial class Home : ComponentBase, IAsyncDisposable
         IsLoadingStories = true;
         try
         {
-            DevOpsStories = await AzureDevOpsService.GetStoriesWithAttachmentsAsync(
-                DevOpsOrganization.Trim(),
-                DevOpsProject.Trim(),
-                DevOpsPatToken.Trim(),
-                DevOpsBuiltQuery,
-                CancellationToken.None);
+            // Check if Dashboard has already loaded the same data
+            if (DashboardState.HasLoadedOnce && 
+                DashboardState.Stories.Count > 0 &&
+                DashboardState.ConnectionStatus == "Connected")
+            {
+                // Reuse cached data from Dashboard instead of making redundant API calls
+                DevOpsStories = DashboardState.Stories.ToList();
+                DevOpsConnectionStatus = "Connected (Cached)";
+            }
+            else
+            {
+                // Load fresh data from Azure DevOps
+                DevOpsStories = await AzureDevOpsService.GetStoriesWithAttachmentsAsync(
+                    DevOpsOrganization.Trim(),
+                    DevOpsProject.Trim(),
+                    DevOpsPatToken.Trim(),
+                    DevOpsBuiltQuery,
+                    CancellationToken.None);
+
+                // Update Dashboard cache so Dashboard doesn't need to load again
+                if (DevOpsStories.Count > 0)
+                {
+                    DashboardState.SetStories(DevOpsStories, "Connected");
+                }
+
+                DevOpsConnectionStatus = "Connected";
+            }
 
             DevOpsTotalStories = DevOpsStories.Count;
             DevOpsStoriesWithAttachments = DevOpsStories.Count(s => s.Attachments.Count > 0);

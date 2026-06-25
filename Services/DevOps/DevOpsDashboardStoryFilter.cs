@@ -29,10 +29,16 @@ internal static class DevOpsDashboardStoryFilter
         return query.OrderByDescending(story => story.Id);
     }
 
-    public static IEnumerable<DevOpsStoryItem> GetRunningStories(IEnumerable<DevOpsStoryItem> stories)
+    public static IEnumerable<DevOpsStoryItem> GetRunningStories(IEnumerable<DevOpsStoryItem> stories, string? filter = null)
     {
-        return stories
-            .Where(story => string.Equals(story.State, "Coding In Progress", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(story => story.Id);
+        var query = stories
+            .Where(story => string.Equals(story.ExecutionMode, "Claude Orchestrator", StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(filter) && !string.Equals(filter, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(story => string.Equals(story.State, "Coding In Progress", StringComparison.OrdinalIgnoreCase));
+        }
+
+        return query.OrderByDescending(story => story.Id);
     }
 }
