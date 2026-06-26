@@ -44,6 +44,7 @@ internal static class OrchestratorPhaseProgressHelper
     /// </summary>
     private static readonly Dictionary<string, int> PhaseProgressMap = new(StringComparer.OrdinalIgnoreCase)
     {
+        { "Knowledge Update", 99 },
         { "Awaiting Mockup Review", 10 },
         { "Awaiting Plan Review", 20 },
         { "Backend Implementing", 30 },
@@ -53,23 +54,26 @@ internal static class OrchestratorPhaseProgressHelper
         { "UI QA", 80 },
         { "Inserting Messages", 88 },
         { "Creating PRs", 92 },
-        { "Awaiting PR Review", 95 },
+        { "Awaiting PR Review", 94 },
+        { "Full QA", 95 },
         { "Complete", 100 }
     };
 
     private static readonly List<PhaseStage> PhaseStages = new()
     {
-        new PhaseStage { StageNumber = 1, StageName = "Mockup Generated", PhaseReached = "Awaiting Mockup Review", Progress = 10 },
-        new PhaseStage { StageNumber = 2, StageName = "Plan Generated", PhaseReached = "Awaiting Plan Review", Progress = 20 },
-        new PhaseStage { StageNumber = 3, StageName = "Backend Plan Created", PhaseReached = "Backend Implementing", Progress = 30 },
-        new PhaseStage { StageNumber = 4, StageName = "Backend Implementation Complete", PhaseReached = "Backend QA", Progress = 45 },
-        new PhaseStage { StageNumber = 5, StageName = "Backend QA Complete", PhaseReached = "UI Planning", Progress = 55 },
-        new PhaseStage { StageNumber = 6, StageName = "UI Plan Created", PhaseReached = "UI Implementing", Progress = 60 },
-        new PhaseStage { StageNumber = 7, StageName = "UI Implementation Complete", PhaseReached = "UI QA", Progress = 80 },
-        new PhaseStage { StageNumber = 8, StageName = "UI QA Complete", PhaseReached = "Inserting Messages", Progress = 88 },
-        new PhaseStage { StageNumber = 9, StageName = "Message Insertion Complete", PhaseReached = "Creating PRs", Progress = 92 },
-        new PhaseStage { StageNumber = 10, StageName = "PRs Created", PhaseReached = "Awaiting PR Review", Progress = 95 },
-        new PhaseStage { StageNumber = 11, StageName = "Implementation Complete", PhaseReached = "Complete", Progress = 100 }
+        new PhaseStage { StageNumber = 1, StageName = "Full QA Complete", PhaseReached = "Knowledge Update", Progress = 99 },
+        new PhaseStage { StageNumber = 2, StageName = "Mockup Generated", PhaseReached = "Awaiting Mockup Review", Progress = 10 },
+        new PhaseStage { StageNumber = 3, StageName = "Plan Generated", PhaseReached = "Awaiting Plan Review", Progress = 20 },
+        new PhaseStage { StageNumber = 4, StageName = "Backend Plan Created", PhaseReached = "Backend Implementing", Progress = 30 },
+        new PhaseStage { StageNumber = 5, StageName = "Backend Implementation Complete", PhaseReached = "Backend QA", Progress = 45 },
+        new PhaseStage { StageNumber = 6, StageName = "Backend QA Complete", PhaseReached = "UI Planning", Progress = 55 },
+        new PhaseStage { StageNumber = 7, StageName = "UI Plan Created", PhaseReached = "UI Implementing", Progress = 60 },
+        new PhaseStage { StageNumber = 8, StageName = "UI Implementation Complete", PhaseReached = "UI QA", Progress = 80 },
+        new PhaseStage { StageNumber = 9, StageName = "UI QA Complete", PhaseReached = "Inserting Messages", Progress = 88 },
+        new PhaseStage { StageNumber = 10, StageName = "Message Insertion Complete", PhaseReached = "Creating PRs", Progress = 92 },
+        new PhaseStage { StageNumber = 11, StageName = "PRs Created", PhaseReached = "Awaiting PR Review", Progress = 94 },
+        new PhaseStage { StageNumber = 12, StageName = "UI QA Complete", PhaseReached = "Full QA", Progress = 95 },
+        new PhaseStage { StageNumber = 13, StageName = "Implementation Complete", PhaseReached = "Complete", Progress = 100 }
     };
 
     /// <summary>
