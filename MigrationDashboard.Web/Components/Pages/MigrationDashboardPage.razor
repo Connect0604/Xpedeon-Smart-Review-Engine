@@ -1,0 +1,1064 @@
+@page "/"
+@page "/migration-dashboard"
+@using MigrationDashboard.Web.Components.Dashboard
+@using MigrationDashboard.Web.Models
+@using MigrationDashboard.Web.Services
+@using Microsoft.JSInterop
+@inject IMigrationDashboardService DashboardService
+@inject IEditorAuthenticationService EditorAuthenticationService
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<PageTitle>Migration Dashboard</PageTitle>
+
+<div class="migration-dashboard-page">
+    <header class="migration-dashboard-header">
+        <div class="migration-dashboard-title">
+            <p class="app-kicker">Blazor Migration Dashboard</p>
+        </div>
+
+        <div class="header-toolbar-shell">
+            <div class="header-search-region">
+                <div class="header-search-shell" data-search-scope="@GetHeaderSearchScopeTheme()">
+                    <label class="field-label sr-only" for="dashboard-search-scope">Search scope</label>
+                    <select id="dashboard-search-scope"
+                            data-testid="search-scope"
+                            class="form-select header-search-scope"
+                            value="@_searchScope"
+                            @onchange="HandleSearchScopeChanged">
+                        <option value="@SearchScopes.All">All</option>
+                        <option value="@SearchScopes.FormName">Form Name</option>
+                        <option value="@SearchScopes.ProcessCode">Process Code</option>
+                        <option value="@SearchScopes.StepCode">Step Code</option>
+                    </select>
+                    <div class="header-search-input-shell">
+                        <label class="field-label sr-only" for="dashboard-search">Global search</label>
+                        <input id="dashboard-search"
+                               data-testid="form-search"
+                               class="form-control header-search-input"
+                               value="@_searchTerm"
+                               @oninput="HandleSearchInput"
+                               placeholder="Search forms, objects, procedures"
+                               autocomplete="off" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="header-audit-region">
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary header-audit-button"
+                        data-testid="audit-button"
+                        @onclick="OpenAuditPopupAsync">
+                    Audit
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="dashboard-root" data-testid="dashboard-root" tabindex="0" @onkeydown="HandleKeyDown" @onkeydown:window="HandleKeyDown">
+    <div class="dashboard-shell">
+        <FormListPanel Forms="_forms"
+                       EventReviewStatesByForm="GetEventReviewStatesByForm()"
+                       CurrentEventBadgeFilter="@_eventBadgeFilter"
+                       EventBadgeFilterChanged="HandleEventBadgeFilterChanged"
+                       SelectedFormId="_selectedFormId"
+                       SelectForm="HandleFormSelected" />
+
+        <section class="dashboard-content">
+            <FormSummaryCard Form="_dashboard?.Form" />
+
+            @if (!string.IsNullOrWhiteSpace(_loadError))
+            {
+                <div class="load-error">@_loadError</div>
+            }
+
+            @if (_isEditMode)
+            {
+                <div class="ownership-edit-toolbar">
+                    <span class="mode-pill mode-pill-edit">Editing as @_editorUserName</span>
+                    <button type="button"
+                            class="btn btn-sm btn-primary"
+                            data-testid="save-all-changes"
+                            disabled="@(!HasPendingChanges() || _isBatchSaving)"
+                            @onclick="HandleSaveAllChangesAsync">
+                        @(_isBatchSaving ? "Saving..." : "Save Changes")
+                    </button>
+                    <button type="button"
+                            class="btn btn-sm btn-outline-secondary"
+                            data-testid="exit-edit-mode"
+                            @onclick="ExitEditMode">
+                        Exit Edit Mode
+                    </button>
+                </div>
+            }
+
+            <div class="dashboard-sections">
+                <section class="panel dashboard-section ownership-section-panel"
+                         data-testid="ownership-section"
+                         data-expanded="@(_isOwnershipExpanded ? "true" : "false")">
+                    <div class="section-header-inline" data-testid="ownership-section-header">
+                        <div class="section-toggle-copy">
+                            <span class="section-toggle-title-row">
+                                <span class="section-title">Ownership Map</span>
+                                <span class="section-badge">@GetOwnershipCountLabel()</span>
+                            </span>
+                        </div>
+
+                        <div class="section-header-actions">
+                            <div class="section-filters">
+                                <div class="section-filter-item">
+                                    <label class="section-filter-label" for="layer-filter">Layer</label>
+                                    <select id="layer-filter"
+                                            data-testid="layer-filter"
+                                            class="form-select form-select-sm section-filter-select"
+                                            value="@(_layerFilter ?? string.Empty)"
+                                            @onchange="args => HandleLayerFilterChanged(args.Value?.ToString())">
+                                        <option value="">All layers</option>
+                                        @foreach (var layer in _availableLayers)
+                                        {
+                                            <option value="@layer">@layer</option>
+                                        }
+                                    </select>
+                                </div>
+
+                                <div class="section-filter-item">
+                                    <label class="section-filter-label" for="ownership-filter">Ownership</label>
+                                    <select id="ownership-filter"
+                                            data-testid="ownership-filter"
+                                            class="form-select form-select-sm section-filter-select"
+                                            value="@(_ownershipFilter ?? string.Empty)"
+                                            @onchange="args => HandleOwnershipFilterChanged(args.Value?.ToString())">
+                                        <option value="">All ownership states</option>
+                                        @foreach (var category in OwnershipCategories.All)
+                                        {
+                                            <option value="@category">@category</option>
+                                        }
+                                    </select>
+                                </div>
+                            </div>
+
+                            <button type="button"
+                                    class="section-toggle section-toggle-icon"
+                                    data-testid="ownership-section-toggle"
+                                    aria-expanded="@(_isOwnershipExpanded ? "true" : "false")"
+                                    @onclick="ToggleOwnershipSection">
+                                <span class="section-chevron" aria-hidden="true">@(_isOwnershipExpanded ? "-" : "+")</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (_isOwnershipExpanded)
+                    {
+                        <OwnershipGrid @key="_selectedFormId"
+                                       Rows="_editableRows"
+                                       IsEditMode="_isEditMode"
+                                       RowChanged="HandleOwnershipRowChanged" />
+                    }
+                </section>
+
+                <section class="panel dashboard-section events-section-panel"
+                         data-testid="events-section"
+                         data-expanded="@(_isEventsExpanded ? "true" : "false")">
+                    <div class="section-header-inline" data-testid="events-section-header">
+                        <div class="section-toggle-copy">
+                            <span class="section-toggle-title-row">
+                                <span class="section-title">Events</span>
+                            </span>
+                        </div>
+
+                        <div class="section-header-actions">
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    data-testid="events-scope-toggle"
+                                    @onclick="ToggleEventScope">
+                                @(_showAllEvents ? $"Show only {GetSelectedFormName() ?? "selected form"} events" : "Show all events")
+                            </button>
+
+                            <button type="button"
+                                    class="section-toggle section-toggle-icon"
+                                    data-testid="events-section-toggle"
+                                    aria-expanded="@(_isEventsExpanded ? "true" : "false")"
+                                    @onclick="ToggleEventsSection">
+                                <span class="section-chevron" aria-hidden="true">@(_isEventsExpanded ? "-" : "+")</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (_isEventsExpanded)
+                    {
+                        <EventsPanel @key="GetEventsGridStateKey()"
+                                     Rows="GetVisibleEventRows()"
+                                     ShowAllEvents="_showAllEvents"
+                                     IsEditMode="_isEditMode"
+                                     RowChanged="HandleEventRowChanged" />
+                    }
+                </section>
+            </div>
+        </section>
+    </div>
+
+    <EditorLoginDialog Visible="_showLoginDialog"
+                       UserName="@_pendingLoginUserName"
+                       ValidationMessage="@LoginValidationMessage"
+                       ReturnUrl="@BuildEditModeReturnUrl()"
+                       UserNameChanged="value => _pendingLoginUserName = value.Trim()"
+                       OnCancel="CancelLoginPrompt" />
+
+    <AuditViewerPopup Visible="_isAuditPopupOpen"
+                      IsLoading="_isAuditLoading"
+                      LoadError="@_auditLoadError"
+                      Rows="_auditRows"
+                      CurrentSearchScope="@_auditSearchScope"
+                      CurrentSearchTerm="@_auditSearchTerm"
+                      OnClose="CloseAuditPopup"
+                      SearchScopeChanged="HandleAuditSearchScopeChanged"
+                      SearchTermChanged="HandleAuditSearchChanged" />
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "enterEditMode")]
+    public bool EnterEditMode { get; set; }
+
+    [SupplyParameterFromQuery(Name = "loginError")]
+    public string? LoginError { get; set; }
+
+    [SupplyParameterFromQuery(Name = "editGrant")]
+    public string? EditGrant { get; set; }
+
+    [SupplyParameterFromQuery(Name = "selectedFormId")]
+    public int? RequestedFormId { get; set; }
+
+    private IReadOnlyList<MigrationFormListItem> _allForms = [];
+    private IReadOnlyList<MigrationFormListItem> _forms = [];
+    private MigrationDashboardViewModel? _dashboard;
+    private List<EditableOwnershipRow> _editableRows = [];
+    private List<EditableChangeEventRow> _editableEventRows = [];
+    private IReadOnlyList<string> _availableLayers = [];
+    private int? _selectedFormId;
+    private string? _searchTerm;
+    private string _searchScope = SearchScopes.All;
+    private string? _eventBadgeFilter;
+    private string? _layerFilter;
+    private string? _ownershipFilter;
+    private bool _isEditMode;
+    private bool _showLoginDialog;
+    private string _pendingLoginUserName = string.Empty;
+    private string? _loadError;
+    private string? LoginValidationMessage { get; set; }
+    private ChangeEventFeedViewModel? _eventFeed;
+    private bool _showAllEvents;
+    private bool _isAuditPopupOpen;
+    private bool _isAuditLoading;
+    private string? _auditLoadError;
+    private IReadOnlyList<AuditLogRow> _auditRows = [];
+    private string _auditSearchScope = SearchScopes.All;
+    private string? _auditSearchTerm;
+    private bool _isOwnershipExpanded = true;
+    private bool _isEventsExpanded = true;
+    private string? _editorUserName;
+    private bool _isBatchSaving;
+    private Dictionary<OwnershipObjectKey, OwnershipEditState> _originalOwnershipState = [];
+    private Dictionary<int, EventEditState> _originalEventState = [];
+    private IJSObjectReference? _shortcutModule;
+    private IJSObjectReference? _shortcutRegistration;
+    private DotNetObjectReference<MigrationDashboardPage>? _shortcutDotNetReference;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadFormsAsync();
+        await LoadEventsAsync();
+        await SyncAuthenticationStateAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            await SyncClientEditModeStateAsync();
+            return;
+        }
+
+        _shortcutModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/dashboard-shortcuts.js");
+        _shortcutDotNetReference = DotNetObjectReference.Create(this);
+        _shortcutRegistration = await _shortcutModule.InvokeAsync<IJSObjectReference>("registerEditShortcut", _shortcutDotNetReference);
+        await SyncClientEditModeStateAsync();
+    }
+
+    private async Task LoadFormsAsync()
+    {
+        _loadError = null;
+
+        try
+        {
+            _allForms = await DashboardService.GetFormsAsync(_searchTerm, _searchScope, CancellationToken.None);
+            _forms = ApplyEventBadgeFilter(_allForms);
+
+            if (_forms.Count == 0)
+            {
+                _selectedFormId = null;
+                _dashboard = null;
+                _editableRows = [];
+                _availableLayers = [];
+                return;
+            }
+
+            if (_selectedFormId is null || _forms.All(form => form.FormId != _selectedFormId))
+            {
+                _selectedFormId = RequestedFormId is int requestedFormId && _forms.Any(form => form.FormId == requestedFormId)
+                    ? requestedFormId
+                    : _forms[0].FormId;
+            }
+
+            await LoadDashboardAsync();
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+        }
+    }
+
+    private async Task LoadDashboardAsync()
+    {
+        if (_selectedFormId is null)
+        {
+            return;
+        }
+
+        var unfilteredDashboard = await DashboardService.GetDashboardAsync(
+            _selectedFormId.Value,
+            layerFilter: null,
+            ownershipFilter: null,
+            searchTerm: null,
+            searchScope: _searchScope,
+            CancellationToken.None);
+
+        _dashboard = await DashboardService.GetDashboardAsync(_selectedFormId.Value, _layerFilter, _ownershipFilter, _searchTerm, _searchScope, CancellationToken.None);
+        _editableRows = _dashboard?.ObjectRows.Select(EditableOwnershipRow.FromRow).ToList() ?? [];
+        _originalOwnershipState = _editableRows.ToDictionary(
+            item => item.Key,
+            item => new OwnershipEditState(item.OwnershipCategory, item.Remarks));
+        _availableLayers = unfilteredDashboard?.ObjectRows
+            .Select(row => row.Layer)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(layer => layer)
+            .ToList() ?? [];
+    }
+
+    private async Task LoadEventsAsync()
+    {
+        _eventFeed = await DashboardService.GetEventsAsync(_searchTerm, _searchScope, CancellationToken.None);
+        _editableEventRows = BuildEditableEventRows();
+        _originalEventState = _editableEventRows.ToDictionary(
+            item => item.DetailId,
+            item => new EventEditState(item.ReviewStatus, item.Remarks));
+    }
+
+    private async Task HandleSearchChanged(string? value)
+    {
+        _searchTerm = value;
+
+        if (!string.IsNullOrWhiteSpace(_searchTerm))
+        {
+            _layerFilter = null;
+            _ownershipFilter = null;
+        }
+
+        await LoadEventsAsync();
+        await LoadFormsAsync();
+    }
+
+    private Task HandleSearchInput(ChangeEventArgs args)
+    {
+        return HandleSearchChanged(args.Value?.ToString());
+    }
+
+    private async Task HandleSearchScopeChanged(ChangeEventArgs args)
+    {
+        _searchScope = args.Value?.ToString() switch
+        {
+            SearchScopes.FormName => SearchScopes.FormName,
+            SearchScopes.ProcessCode => SearchScopes.ProcessCode,
+            SearchScopes.StepCode => SearchScopes.StepCode,
+            _ => SearchScopes.All
+        };
+
+        await LoadEventsAsync();
+        await LoadFormsAsync();
+    }
+
+    private async Task HandleEventBadgeFilterChanged(string? value)
+    {
+        _eventBadgeFilter = string.IsNullOrWhiteSpace(value) ? null : value;
+        await LoadEventsAsync();
+        await LoadFormsAsync();
+    }
+
+    private string GetHeaderSearchScopeTheme()
+    {
+        return _searchScope switch
+        {
+            SearchScopes.FormName => "form-name",
+            SearchScopes.ProcessCode => "process-code",
+            SearchScopes.StepCode => "step-code",
+            _ => "all"
+        };
+    }
+
+    private async Task OpenAuditPopupAsync()
+    {
+        _isAuditPopupOpen = true;
+        _auditSearchScope = SearchScopes.All;
+        _auditSearchTerm = null;
+        await LoadAuditRowsAsync();
+    }
+
+    private Task CloseAuditPopup()
+    {
+        _isAuditPopupOpen = false;
+        _auditLoadError = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleAuditSearchScopeChanged(string? value)
+    {
+        _auditSearchScope = value switch
+        {
+            SearchScopes.FormName => SearchScopes.FormName,
+            SearchScopes.ProcessCode => SearchScopes.ProcessCode,
+            SearchScopes.StepCode => SearchScopes.StepCode,
+            _ => SearchScopes.All
+        };
+        await LoadAuditRowsAsync();
+    }
+
+    private async Task HandleAuditSearchChanged(string? value)
+    {
+        _auditSearchTerm = value;
+        await LoadAuditRowsAsync();
+    }
+
+    private async Task HandleFormSelected(int formId)
+    {
+        _selectedFormId = formId;
+        _layerFilter = null;
+        _ownershipFilter = null;
+        await LoadDashboardAsync();
+    }
+
+    private async Task HandleLayerFilterChanged(string? value)
+    {
+        _layerFilter = string.IsNullOrWhiteSpace(value) ? null : value;
+        await LoadDashboardAsync();
+    }
+
+    private async Task HandleOwnershipFilterChanged(string? value)
+    {
+        _ownershipFilter = string.IsNullOrWhiteSpace(value) ? null : value;
+        await LoadDashboardAsync();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs args)
+    {
+        if (args.CtrlKey && args.ShiftKey && string.Equals(args.Key, "E", StringComparison.OrdinalIgnoreCase))
+        {
+            await TriggerEditShortcutAsync();
+        }
+    }
+
+    [JSInvokable]
+    public Task HandleGlobalEditShortcut()
+    {
+        return TriggerEditShortcutAsync();
+    }
+
+    private async Task ExitEditMode()
+    {
+        _isEditMode = false;
+        _editorUserName = null;
+        await SyncClientEditModeStateAsync();
+        Navigation.NavigateTo(EditorAuthenticationService.BuildLogoutUrl(BuildDashboardReturnUrl(includeEditMode: false)), forceLoad: true);
+    }
+
+    private void ToggleOwnershipSection()
+    {
+        _isOwnershipExpanded = !_isOwnershipExpanded;
+    }
+
+    private void ToggleEventsSection()
+    {
+        _isEventsExpanded = !_isEventsExpanded;
+    }
+
+    private Task ToggleEventScope()
+    {
+        _showAllEvents = !_showAllEvents;
+        return Task.CompletedTask;
+    }
+
+    private Task HandleOwnershipRowChanged(EditableOwnershipRow row)
+    {
+        row.StatusMessage = null;
+        row.HasError = false;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task HandleEventRowChanged(EditableChangeEventRow row)
+    {
+        row.StatusMessage = null;
+        row.HasError = false;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleSaveAllChangesAsync()
+    {
+        if (_isBatchSaving || !HasPendingChanges())
+        {
+            return;
+        }
+
+        var authenticationState = await EditorAuthenticationService.GetAuthenticationStateAsync();
+        if (!authenticationState.HasActiveEditSession)
+        {
+            LoginValidationMessage = authenticationState.IsAuthenticated
+                ? "Edit session ended. Sign in again to continue editing."
+                : "Sign in before saving.";
+            _showLoginDialog = true;
+            return;
+        }
+
+        await SaveAllDirtyRowsAsync();
+    }
+
+    private async Task HandleRowSaveAsync(EditableOwnershipRow row)
+    {
+        row.StatusMessage = null;
+        row.HasError = false;
+
+        var authenticationState = await EditorAuthenticationService.GetAuthenticationStateAsync();
+        if (!authenticationState.HasActiveEditSession)
+        {
+            row.StatusMessage = authenticationState.IsAuthenticated
+                ? "Edit session ended. Sign in again to continue editing."
+                : "Sign in before saving.";
+            row.HasError = true;
+            _showLoginDialog = true;
+            return;
+        }
+
+        await SaveRowAsync(row);
+    }
+
+    private async Task HandleEventRowSaveAsync(EditableChangeEventRow row)
+    {
+        row.StatusMessage = null;
+        row.HasError = false;
+
+        var authenticationState = await EditorAuthenticationService.GetAuthenticationStateAsync();
+        if (!authenticationState.HasActiveEditSession)
+        {
+            row.StatusMessage = authenticationState.IsAuthenticated
+                ? "Edit session ended. Sign in again to continue editing."
+                : "Sign in before saving.";
+            row.HasError = true;
+            _showLoginDialog = true;
+            return;
+        }
+
+        await SaveEventRowAsync(row);
+    }
+
+    private void CancelLoginPrompt()
+    {
+        _showLoginDialog = false;
+        LoginValidationMessage = null;
+        _pendingLoginUserName = string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(LoginError))
+        {
+            ClearTransientQueryParameters();
+        }
+    }
+
+    private async Task SaveRowAsync(EditableOwnershipRow row)
+    {
+        row.IsSaving = true;
+
+        try
+        {
+            await DashboardService.UpdateOwnershipAsync(
+                new UpdateOwnershipRowRequest(
+                    row.Key,
+                    row.OwnershipCategory,
+                    row.Remarks),
+                CancellationToken.None);
+
+            await LoadDashboardAsync();
+
+            var updatedRow = _editableRows.SingleOrDefault(item => item.Key == row.Key);
+            if (updatedRow is not null)
+            {
+                updatedRow.StatusMessage = "Saved";
+                updatedRow.HasError = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            row.StatusMessage = ex.Message;
+            row.HasError = true;
+        }
+        finally
+        {
+            row.IsSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveEventRowAsync(EditableChangeEventRow row)
+    {
+        row.IsSaving = true;
+
+        try
+        {
+            await DashboardService.UpdateReviewStatusAsync(
+                new UpdateReviewStatusRequest(
+                    row.DetailId,
+                    row.ReviewStatus,
+                    row.Remarks),
+                CancellationToken.None);
+
+            await LoadEventsAsync();
+
+            var updatedRow = _editableEventRows.SingleOrDefault(item => item.DetailId == row.DetailId);
+            if (updatedRow is not null)
+            {
+                updatedRow.StatusMessage = "Saved";
+                updatedRow.HasError = false;
+                updatedRow.IsSaving = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            row.StatusMessage = ex.Message;
+            row.HasError = true;
+            row.IsSaving = false;
+        }
+        finally
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveAllDirtyRowsAsync()
+    {
+        _isBatchSaving = true;
+
+        var dirtyOwnershipRows = _editableRows.Where(IsOwnershipDirty).ToList();
+        var dirtyEventRows = _editableEventRows.Where(IsEventDirty).ToList();
+
+        foreach (var row in dirtyOwnershipRows)
+        {
+            await PersistOwnershipRowAsync(row);
+        }
+
+        foreach (var row in dirtyEventRows)
+        {
+            await PersistEventRowAsync(row);
+        }
+
+        _isBatchSaving = false;
+        StateHasChanged();
+    }
+
+    private async Task PersistOwnershipRowAsync(EditableOwnershipRow row)
+    {
+        row.StatusMessage = null;
+        row.HasError = false;
+        row.IsSaving = true;
+
+        try
+        {
+            await DashboardService.UpdateOwnershipAsync(
+                new UpdateOwnershipRowRequest(
+                    row.Key,
+                    row.OwnershipCategory,
+                    row.Remarks),
+                CancellationToken.None);
+
+            row.ModifiedBy = _editorUserName;
+            row.ModifiedDate = DateTime.UtcNow;
+            row.StatusMessage = "Saved";
+            _originalOwnershipState[row.Key] = new OwnershipEditState(row.OwnershipCategory, row.Remarks);
+        }
+        catch (Exception ex)
+        {
+            row.StatusMessage = ex.Message;
+            row.HasError = true;
+        }
+        finally
+        {
+            row.IsSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PersistEventRowAsync(EditableChangeEventRow row)
+    {
+        row.StatusMessage = null;
+        row.HasError = false;
+        row.IsSaving = true;
+
+        try
+        {
+            await DashboardService.UpdateReviewStatusAsync(
+                new UpdateReviewStatusRequest(
+                    row.DetailId,
+                    row.ReviewStatus,
+                    row.Remarks),
+                CancellationToken.None);
+
+            row.ModifiedBy = _editorUserName;
+            row.ModifiedDate = DateTime.UtcNow;
+            row.StatusMessage = "Saved";
+            _originalEventState[row.DetailId] = new EventEditState(row.ReviewStatus, row.Remarks);
+        }
+        catch (Exception ex)
+        {
+            row.StatusMessage = ex.Message;
+            row.HasError = true;
+        }
+        finally
+        {
+            row.IsSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SyncAuthenticationStateAsync()
+    {
+        if (EnterEditMode && !_isEditMode && !string.IsNullOrWhiteSpace(EditGrant))
+        {
+            await EditorAuthenticationService.TryActivateEditSessionAsync(EditGrant);
+        }
+
+        var authenticationState = await EditorAuthenticationService.GetAuthenticationStateAsync();
+
+        _editorUserName = authenticationState.UserName;
+        _isEditMode = authenticationState.HasActiveEditSession;
+
+        if (authenticationState.HasActiveEditSession)
+        {
+            _showLoginDialog = false;
+            LoginValidationMessage = null;
+            if (EnterEditMode || !string.IsNullOrWhiteSpace(EditGrant))
+            {
+                ClearTransientQueryParameters();
+                return;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(LoginError))
+        {
+            _showLoginDialog = true;
+            LoginValidationMessage = LoginError;
+            _pendingLoginUserName = authenticationState.UserName ?? string.Empty;
+        }
+        else if (EnterEditMode)
+        {
+            _showLoginDialog = true;
+            LoginValidationMessage = null;
+            _pendingLoginUserName = authenticationState.UserName ?? string.Empty;
+        }
+        else
+        {
+            _showLoginDialog = false;
+        }
+
+        await SyncClientEditModeStateAsync();
+    }
+
+    private async Task LoadAuditRowsAsync()
+    {
+        _isAuditLoading = true;
+        _auditLoadError = null;
+
+        try
+        {
+            var normalizedSearchTerm = string.IsNullOrWhiteSpace(_auditSearchTerm) ? null : _auditSearchTerm.Trim();
+            _auditRows = await DashboardService.GetAuditLogsAsync(
+                string.Equals(_auditSearchScope, SearchScopes.FormName, StringComparison.Ordinal) ? normalizedSearchTerm : null,
+                string.Equals(_auditSearchScope, SearchScopes.ProcessCode, StringComparison.Ordinal) ? normalizedSearchTerm : null,
+                string.Equals(_auditSearchScope, SearchScopes.StepCode, StringComparison.Ordinal) ? normalizedSearchTerm : null,
+                string.Equals(_auditSearchScope, SearchScopes.All, StringComparison.Ordinal) ? normalizedSearchTerm : null,
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _auditLoadError = ex.Message;
+            _auditRows = [];
+        }
+        finally
+        {
+            _isAuditLoading = false;
+        }
+    }
+
+    private void ClearTransientQueryParameters()
+    {
+        Navigation.NavigateTo(BuildDashboardReturnUrl(includeEditMode: false), replace: true);
+    }
+
+    private IReadOnlyList<EditableChangeEventRow> GetVisibleEventRows()
+    {
+        if (_editableEventRows.Count == 0)
+        {
+            return [];
+        }
+
+        if (_showAllEvents)
+        {
+            return _editableEventRows;
+        }
+
+        if (_selectedFormId is null)
+        {
+            return [];
+        }
+
+        return _editableEventRows
+            .Where(item => item.FormId == _selectedFormId.Value)
+            .ToList();
+    }
+
+    private List<EditableChangeEventRow> BuildEditableEventRows()
+    {
+        if (_eventFeed is null)
+        {
+            return [];
+        }
+
+        var eventsById = _eventFeed.Events.ToDictionary(item => item.EventId);
+        var formsById = _allForms.ToDictionary(item => item.FormId);
+
+        return _eventFeed.EventDetails
+            .Where(item => eventsById.ContainsKey(item.EventId))
+            .Select(item =>
+            {
+                var evt = eventsById[item.EventId];
+                var hasForm = formsById.TryGetValue(item.FormId, out var form);
+
+                return new EditableChangeEventRow
+                {
+                    DetailId = item.DetailId,
+                    EventId = item.EventId,
+                    FormId = item.FormId,
+                    FormName = hasForm ? form!.FormName : $"Form {item.FormId}",
+                    ProcessCode = hasForm ? GetDisplayValue(form!.ProcessCode) : "Not set",
+                    StepCode = hasForm ? GetDisplayValue(form!.StepCode) : "Not set",
+                    BuildNumber = GetDisplayValue(evt.BuildNumber),
+                    BranchName = GetDisplayValue(evt.BranchName),
+                    ChangedBy = GetDisplayValue(evt.ChangedBy),
+                    CommitId = GetDisplayValue(evt.CommitId),
+                    EventTimestamp = evt.EventTimestamp,
+                    ObjectName = item.ObjectName,
+                    Layer = GetDisplayValue(item.Layer),
+                    ObjectType = GetDisplayValue(item.ObjectType),
+                    OwnershipCategory = item.OwnershipCategory,
+                    ReviewStatus = item.ReviewStatus,
+                    Remarks = item.Remarks,
+                    ModifiedBy = item.ModifiedBy,
+                    ModifiedDate = item.ModifiedDate
+                };
+            })
+            .OrderByDescending(item => item.EventTimestamp)
+            .ThenByDescending(item => item.DetailId)
+            .ToList();
+    }
+
+    private bool HasPendingChanges()
+    {
+        return _editableRows.Any(IsOwnershipDirty) || _editableEventRows.Any(IsEventDirty);
+    }
+
+    private bool IsOwnershipDirty(EditableOwnershipRow row)
+    {
+        if (!_originalOwnershipState.TryGetValue(row.Key, out var original))
+        {
+            return false;
+        }
+
+        return !string.Equals(row.OwnershipCategory, original.OwnershipCategory, StringComparison.Ordinal)
+            || !string.Equals(row.Remarks, original.Remarks, StringComparison.Ordinal);
+    }
+
+    private bool IsEventDirty(EditableChangeEventRow row)
+    {
+        return _originalEventState.TryGetValue(row.DetailId, out var original)
+            && (!string.Equals(row.ReviewStatus, original.ReviewStatus, StringComparison.Ordinal)
+                || !string.Equals(row.Remarks, original.Remarks, StringComparison.Ordinal));
+    }
+
+    private string? GetSelectedFormName()
+    {
+        if (_selectedFormId is null)
+        {
+            return null;
+        }
+
+        return _allForms.SingleOrDefault(item => item.FormId == _selectedFormId.Value)?.FormName;
+    }
+
+    private string GetOwnershipCountLabel()
+    {
+        var count = _editableRows.Count;
+        return count == 1 ? "1 object" : $"{count} objects";
+    }
+
+    private IReadOnlyDictionary<int, string> GetEventReviewStatesByForm()
+    {
+        if (_eventFeed is null)
+        {
+            return new Dictionary<int, string>();
+        }
+
+        return _eventFeed.EventDetails
+            .GroupBy(item => item.FormId)
+            .ToDictionary(
+                group => group.Key,
+                group => ResolveEventReviewState(group.Select(item => item.ReviewStatus)));
+    }
+
+    private static string ResolveEventReviewState(IEnumerable<string> reviewStatuses)
+    {
+        var normalizedStatuses = reviewStatuses
+            .Select(status => status.Trim().ToUpperInvariant())
+            .ToList();
+
+        if (normalizedStatuses.Any(status => status is not ReviewStatuses.Actioned and not ReviewStatuses.Dismissed))
+        {
+            return ReviewStatuses.Pending;
+        }
+
+        return normalizedStatuses.Any(status => status == ReviewStatuses.Actioned)
+            ? ReviewStatuses.Actioned
+            : ReviewStatuses.Dismissed;
+    }
+
+    private string GetEventsGridStateKey()
+    {
+        return $"{_selectedFormId}:{_showAllEvents}";
+    }
+
+    private static string GetDisplayValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Not set" : value;
+    }
+
+    private IReadOnlyList<MigrationFormListItem> ApplyEventBadgeFilter(IReadOnlyList<MigrationFormListItem> forms)
+    {
+        if (string.IsNullOrWhiteSpace(_eventBadgeFilter))
+        {
+            return forms;
+        }
+
+        var eventReviewStates = GetEventReviewStatesByForm();
+
+        return forms
+            .Where(form => eventReviewStates.TryGetValue(form.FormId, out var reviewState)
+                && string.Equals(reviewState, _eventBadgeFilter, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private async Task TriggerEditShortcutAsync()
+    {
+        var authenticationState = await EditorAuthenticationService.GetAuthenticationStateAsync();
+        if (authenticationState.HasActiveEditSession)
+        {
+            _editorUserName = authenticationState.UserName;
+            _isEditMode = true;
+            _showLoginDialog = false;
+            LoginValidationMessage = null;
+        }
+        else
+        {
+            _showLoginDialog = true;
+            LoginValidationMessage = null;
+            _pendingLoginUserName = authenticationState.UserName ?? string.Empty;
+        }
+
+        await SyncClientEditModeStateAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SyncClientEditModeStateAsync()
+    {
+        if (_shortcutModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _shortcutModule.InvokeVoidAsync("setEditModeConnectionState", _isEditMode);
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit can disconnect before the browser receives the latest edit-mode state.
+        }
+    }
+
+    private string BuildEditModeReturnUrl()
+    {
+        return BuildDashboardReturnUrl(includeEditMode: true);
+    }
+
+    private string BuildDashboardReturnUrl(bool includeEditMode)
+    {
+        var query = new List<string>();
+
+        if (includeEditMode)
+        {
+            query.Add("enterEditMode=true");
+        }
+
+        if (_selectedFormId is int selectedFormId)
+        {
+            query.Add($"selectedFormId={selectedFormId}");
+        }
+
+        return query.Count == 0
+            ? "/migration-dashboard"
+            : $"/migration-dashboard?{string.Join("&", query)}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_shortcutRegistration is not null)
+            {
+                await _shortcutRegistration.InvokeVoidAsync("dispose");
+                await _shortcutRegistration.DisposeAsync();
+            }
+
+            if (_shortcutModule is not null)
+            {
+                await _shortcutModule.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit can disconnect during navigation/sign-in before JS cleanup runs.
+        }
+        finally
+        {
+            _shortcutDotNetReference?.Dispose();
+        }
+    }
+
+    private sealed record OwnershipEditState(string OwnershipCategory, string? Remarks);
+    private sealed record EventEditState(string ReviewStatus, string? Remarks);
+}

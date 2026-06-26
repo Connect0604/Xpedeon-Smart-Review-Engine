@@ -1,0 +1,294 @@
+.app-frame {
+    height: 100dvh;
+    min-height: 100dvh;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    background:
+        radial-gradient(circle at top left, rgba(48, 14, 82, 0.68), transparent 52%),
+        radial-gradient(circle at top center, rgba(109, 76, 146, 0.18), transparent 36%),
+        radial-gradient(circle at top right, rgba(173, 194, 255, 0.16), transparent 34%),
+        linear-gradient(180deg, #fffefc 0%, #f2f3fb 100%);
+}
+
+.app-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 1rem;
+    align-items: end;
+    padding: 0.8rem 1.5rem 0.75rem;
+}
+
+.app-header-title {
+    min-width: 0;
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.app-header h1 {
+    margin: 0;
+    font-size: 1.45rem;
+}
+
+.app-header-search {
+    display: grid;
+    grid-column: 1 / 4;
+    grid-row: 1;
+    justify-content: stretch;
+    min-width: 0;
+}
+
+.app-header-search ::deep .header-toolbar-shell {
+    display: grid;
+    align-items: center;
+    gap: 0.75rem;
+    grid-template-columns: minmax(0, 1fr) minmax(26rem, 42rem) minmax(0, 1fr) auto;
+    width: 100%;
+}
+
+.app-header-search ::deep .header-search-region {
+    grid-column: 2;
+    justify-self: center;
+    width: 100%;
+}
+
+.app-header-search ::deep .header-search-shell {
+    --header-search-accent: #6f42b5;
+    --header-search-accent-soft: #f3ecfb;
+    --header-search-accent-border: rgba(111, 66, 181, 0.28);
+    --header-search-placeholder: #8a7aa6;
+    --header-search-focus-ring: rgba(111, 66, 181, 0.16);
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    width: 100%;
+}
+
+.app-header-search ::deep .header-search-shell[data-search-scope="form-name"] {
+    --header-search-accent: #2f6fb2;
+    --header-search-accent-soft: #eaf3ff;
+    --header-search-accent-border: rgba(47, 111, 178, 0.28);
+    --header-search-placeholder: #6f87ab;
+    --header-search-focus-ring: rgba(47, 111, 178, 0.16);
+}
+
+.app-header-search ::deep .header-search-shell[data-search-scope="process-code"] {
+    --header-search-accent: #167c80;
+    --header-search-accent-soft: #e8f8f6;
+    --header-search-accent-border: rgba(22, 124, 128, 0.28);
+    --header-search-placeholder: #6a9393;
+    --header-search-focus-ring: rgba(22, 124, 128, 0.16);
+}
+
+.app-header-search ::deep .header-search-shell[data-search-scope="step-code"] {
+    --header-search-accent: #b06a17;
+    --header-search-accent-soft: #fff3e4;
+    --header-search-accent-border: rgba(176, 106, 23, 0.28);
+    --header-search-placeholder: #9f8768;
+    --header-search-focus-ring: rgba(176, 106, 23, 0.16);
+}
+
+.app-header-search ::deep .header-audit-region {
+    grid-column: 4;
+    justify-self: end;
+}
+
+.app-header-spacer {
+    min-width: 0;
+}
+
+.app-header-search ::deep .header-search-input-shell {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 26rem;
+}
+
+.app-header-search ::deep .header-search-input-shell::before {
+    content: "";
+    position: absolute;
+    left: 0.85rem;
+    top: 50%;
+    width: 0.95rem;
+    height: 0.95rem;
+    transform: translateY(-50%);
+    background-color: var(--header-search-accent);
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='black' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m21 21-4.35-4.35m1.85-5.15a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='black' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m21 21-4.35-4.35m1.85-5.15a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z'/%3E%3C/svg%3E");
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.app-header-search ::deep .header-search-scope {
+    width: 8.75rem;
+    min-height: 2.45rem;
+    border-radius: 999px;
+    padding: 0.45rem 2rem 0.45rem 0.9rem;
+    font-size: 0.9rem;
+    color: var(--header-search-accent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--header-search-accent-soft) 88%, white 12%) 0%, #fff 100%);
+    background-image:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.25 8 10.25l4-4' stroke='%236f42b5' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"),
+        linear-gradient(180deg, color-mix(in srgb, var(--header-search-accent-soft) 88%, white 12%) 0%, #fff 100%);
+    background-repeat: no-repeat, no-repeat;
+    background-position: right 0.8rem center, center;
+    background-size: 0.9rem, 100%;
+    border: 1px solid var(--header-search-accent-border);
+    box-shadow: 0 8px 24px var(--header-search-focus-ring);
+    flex: 0 0 auto;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.app-header-search ::deep .header-search-input {
+    width: 100%;
+    min-height: 2.45rem;
+    padding-left: 2.5rem;
+    border-radius: 999px;
+    font-size: 0.92rem;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--header-search-accent-border);
+    box-shadow: 0 8px 24px rgba(30, 47, 77, 0.08);
+}
+
+.app-header-search ::deep .header-search-input::placeholder {
+    color: var(--header-search-placeholder);
+}
+
+.app-header-search ::deep .header-search-scope:focus,
+.app-header-search ::deep .header-search-input:focus {
+    border-color: color-mix(in srgb, var(--header-search-accent) 72%, white 28%);
+    box-shadow: 0 0 0 0.2rem var(--header-search-focus-ring), 0 10px 26px rgba(30, 47, 77, 0.1);
+}
+
+.app-header-search ::deep .header-audit-button {
+    min-height: 2.45rem;
+    padding-inline: 1rem;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    background: linear-gradient(135deg, #6f4b85 0%, #4b216f 100%);
+    border-color: rgba(75, 33, 111, 0.92);
+    color: #fff;
+    box-shadow: 0 10px 24px rgba(75, 33, 111, 0.22);
+}
+
+.app-header-search ::deep .header-audit-button:hover,
+.app-header-search ::deep .header-audit-button:focus {
+    background: linear-gradient(135deg, #7d5994 0%, #5a2f82 100%);
+    border-color: rgba(90, 47, 130, 0.96);
+    color: #fff;
+}
+
+.app-kicker {
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #4b216f;
+}
+
+.app-main {
+    padding: 0 1.5rem 1.5rem;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.migration-shell__content {
+    overflow: hidden;
+}
+
+.migration-shell__content .app-frame {
+    height: 100%;
+    min-height: 0;
+}
+
+.migration-shell__content .app-main {
+    overflow: auto;
+}
+
+#blazor-error-ui {
+    color-scheme: light only;
+    background: lightyellow;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}
+
+@media (max-width: 900px) {
+    .app-frame {
+        height: auto;
+        min-height: 100dvh;
+    }
+
+    .app-header {
+        grid-template-columns: 1fr;
+        align-items: start;
+        padding: 1rem 1rem 0.55rem;
+    }
+
+    .app-header-spacer {
+        display: none;
+    }
+
+    .app-header-search {
+        grid-column: auto;
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .app-header-search ::deep .header-search-shell {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .app-header-search ::deep .header-toolbar-shell {
+        width: 100%;
+        grid-template-columns: 1fr;
+    }
+
+    .app-header-search ::deep .header-search-region,
+    .app-header-search ::deep .header-audit-region {
+        grid-column: auto;
+        width: 100%;
+    }
+
+    .app-header-search ::deep .header-search-input-shell {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .app-header-search ::deep .header-search-scope {
+        width: 100%;
+    }
+
+    .app-header-search ::deep .header-audit-button {
+        grid-column: auto;
+        justify-self: stretch;
+        width: 100%;
+    }
+
+    .app-main {
+        padding: 0 1rem 1rem;
+        overflow: visible;
+    }
+}

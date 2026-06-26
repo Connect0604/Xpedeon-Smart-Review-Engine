@@ -1,0 +1,124 @@
+@using MigrationDashboard.Web.Models
+@inject DashboardGridOptions GridOptions
+
+@if (Visible)
+{
+    <div class="audit-viewer-backdrop" data-testid="audit-viewer-backdrop">
+        <section class="audit-viewer-dialog panel" data-testid="audit-viewer-dialog" aria-modal="true" role="dialog">
+            <div class="audit-viewer-header">
+                <div class="section-toggle-copy">
+                    <span class="section-toggle-title-row">
+                        <span class="section-title">Audit History</span>
+                        <span class="section-badge">@GetAuditCountLabel()</span>
+                    </span>
+                </div>
+
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        data-testid="audit-close-button"
+                        @onclick="OnClose">
+                    Close
+                </button>
+            </div>
+
+            <div class="audit-viewer-toolbar">
+                <select class="form-select form-select-sm audit-viewer-filter"
+                        data-testid="audit-search-scope"
+                        value="@CurrentSearchScope"
+                        @onchange="args => SearchScopeChanged.InvokeAsync(args.Value?.ToString())">
+                    <option value="@SearchScopes.All">All</option>
+                    <option value="@SearchScopes.FormName">Form Name</option>
+                    <option value="@SearchScopes.ProcessCode">Process Code</option>
+                    <option value="@SearchScopes.StepCode">Step Code</option>
+                </select>
+
+                <input class="form-control form-control-sm audit-viewer-search"
+                       data-testid="audit-search"
+                       value="@CurrentSearchTerm"
+                       @oninput="args => SearchTermChanged.InvokeAsync(args.Value?.ToString())"
+                       placeholder="Search forms, processes, steps, users, values"
+                       autocomplete="off" />
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(LoadError))
+            {
+                <div class="load-error">@LoadError</div>
+            }
+            else if (IsLoading)
+            {
+                <div class="empty-state">
+                    <strong>Loading audit history...</strong>
+                </div>
+            }
+            else if (Rows.Count == 0)
+            {
+                <div class="empty-state">
+                    <strong>No audit rows match the current filters.</strong>
+                </div>
+            }
+            else
+            {
+                <div class="table-shell audit-viewer-grid-shell">
+                    <DxGrid Data="Rows"
+                            CssClass="dashboard-data-grid audit-data-grid audit-data-grid-fit"
+                            PageSize="@Math.Max(1, Rows.Count)"
+                            PagerVisible="false"
+                            ShowSearchBox="false"
+                            FilterMenuButtonDisplayMode="@GetFilterMenuButtonDisplayMode()"
+                            AllowSort="true">
+                        <Columns>
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.ChangedDate)" Caption="Changed Date" Width="155px" DisplayFormat="yyyy-MM-dd HH:mm:ss" />
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.ChangedBy)" Caption="Changed By" Width="125px" />
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.FormName)" Caption="Form Name" Width="170px" />
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.ProcessCode)" Caption="Process Code" Width="120px" />
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.StepCode)" Caption="Step Code" Width="180px" />
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.EntityName)" Caption="Entity Name" Width="185px" />
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.ActionName)" Caption="Action" Width="95px" />
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.FieldName)" Caption="Field" Width="130px" />
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.OldValue)" Caption="Old Value" Width="110px">
+                                <CellDisplayTemplate Context="cellContext">
+                                    @{
+                                        var row = (AuditLogRow)cellContext.DataItem;
+                                    }
+                                    <span class="grid-text-ellipsis" title="@row.OldValue">@(row.OldValue ?? "-")</span>
+                                </CellDisplayTemplate>
+                            </DxGridDataColumn>
+                            <DxGridDataColumn FieldName="@nameof(AuditLogRow.NewValue)" Caption="New Value" Width="110px">
+                                <CellDisplayTemplate Context="cellContext">
+                                    @{
+                                        var row = (AuditLogRow)cellContext.DataItem;
+                                    }
+                                    <span class="grid-text-ellipsis" title="@row.NewValue">@(row.NewValue ?? "-")</span>
+                                </CellDisplayTemplate>
+                            </DxGridDataColumn>
+                        </Columns>
+                    </DxGrid>
+                </div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public string? LoadError { get; set; }
+    [Parameter] public string CurrentSearchScope { get; set; } = SearchScopes.All;
+    [Parameter] public string? CurrentSearchTerm { get; set; }
+    [Parameter] public required IReadOnlyList<AuditLogRow> Rows { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<string?> SearchScopeChanged { get; set; }
+    [Parameter] public EventCallback<string?> SearchTermChanged { get; set; }
+
+    private GridFilterMenuButtonDisplayMode GetFilterMenuButtonDisplayMode()
+    {
+        return GridOptions.EnableColumnFiltering
+            ? GridFilterMenuButtonDisplayMode.Always
+            : GridFilterMenuButtonDisplayMode.Never;
+    }
+
+    private string GetAuditCountLabel()
+    {
+        return Rows.Count == 1 ? "1 row" : $"{Rows.Count} rows";
+    }
+}
