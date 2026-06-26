@@ -144,14 +144,17 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     {
         if (startDate is null || completionDate is null)
         {
-            return "Implementation time tracking started when state changes to 'Testing Requested'";
+            return "Implementation time not yet calculated. Start: Orchestrator plan approval, End: Testing Requested state";
         }
 
         var startLocal = startDate.Value.ToLocalTime();
         var completionLocal = completionDate.Value.ToLocalTime();
 
-        return $"Started : {startLocal:g}\nCompleted : {completionLocal:g}";
+        return $"Started (Plan Approved): {startLocal:g}\nCompleted (Testing Requested): {completionLocal:g}";
     }
+
+    private static string FormatImplementationCost(string? cost) =>
+        string.IsNullOrWhiteSpace(cost) ? "-" : $"${cost}";
 
     private async Task LoadAllImplementationDetailsAsync()
     {

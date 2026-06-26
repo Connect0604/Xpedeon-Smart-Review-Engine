@@ -29,4 +29,9 @@ internal sealed class DevOpsStoryItem
     public TimeSpan? ImplementationDuration => StartDate is not null && CompletionDate is not null
         ? CompletionDate.Value - StartDate.Value
         : null;
+
+    /// <summary>
+    /// The implementation cost extracted from comments (e.g., "Total Claude cost: $65.86")
+    /// </summary>
+    public string? ImplementationCost { get; set; }
 }

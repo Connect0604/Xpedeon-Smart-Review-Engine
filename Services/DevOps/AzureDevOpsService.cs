@@ -297,6 +297,10 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             return new StoryRevisionMetadata();
         }
 
+        // Fetch comments to find orchestrator plan approval and completion dates
+        System.Diagnostics.Debug.WriteLine($"[GetRevisionMetadataAsync] Fetching comments for work item {workItemId}");
+        var (orchestratorApprovalDate, orchestratorCompletionDate, implementationCost) = await GetOrchestratorDatesAsync(baseUrl, workItemId, patToken, cancellationToken);
+
         string? previousState = null;
         string? previousPhase = null;
         DateTimeOffset? startDate = null;
@@ -310,20 +314,37 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             var currentPhase = GetFieldString(fields, OrchestratorPhaseFieldName);
             var changedDate = GetFieldDate(fields, "System.ChangedDate");
 
+            // If orchestrator approval date exists, use it as start date
+            if (startDate is null && orchestratorApprovalDate is not null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetRevisionMetadataAsync] Using orchestrator approval date as start date: {orchestratorApprovalDate}");
+                startDate = orchestratorApprovalDate;
+            }
+
+            // Fallback to "Coding In Progress" state change if no orchestrator approval found
             if (startDate is null &&
                 changedDate is not null &&
                 string.Equals(currentState, "Coding In Progress", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(previousState, "Coding In Progress", StringComparison.OrdinalIgnoreCase))
             {
+                System.Diagnostics.Debug.WriteLine($"[GetRevisionMetadataAsync] Using Coding In Progress state as start date: {changedDate}");
                 startDate = changedDate;
             }
 
-            if (startDate is not null &&
+            // If orchestrator completion date exists, use it as completion date
+            if (completionDate is null && orchestratorCompletionDate is not null)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetRevisionMetadataAsync] Using orchestrator completion date: {orchestratorCompletionDate}");
+                completionDate = orchestratorCompletionDate;
+            }
+            // Otherwise, fallback to "Testing Requested" state change
+            else if (startDate is not null &&
                 completionDate is null &&
                 changedDate is not null &&
                 string.Equals(currentState, "Testing Requested", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(previousState, "Testing Requested", StringComparison.OrdinalIgnoreCase))
             {
+                System.Diagnostics.Debug.WriteLine($"[GetRevisionMetadataAsync] Found completion date (Testing Requested): {changedDate}");
                 completionDate = changedDate;
             }
 
@@ -338,12 +359,172 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             previousPhase = currentPhase;
         }
 
+        System.Diagnostics.Debug.WriteLine($"[GetRevisionMetadataAsync] Final metadata - StartDate: {startDate}, CompletionDate: {completionDate}");
+
         return new StoryRevisionMetadata
         {
             StartDate = startDate,
             CompletionDate = completionDate,
-            OrchestratorPhaseUpdated = phaseUpdated
+            OrchestratorPhaseUpdated = phaseUpdated,
+            ImplementationCost = implementationCost
         };
+    }
+
+    private async Task<(DateTimeOffset? ApprovalDate, DateTimeOffset? CompletionDate, string? ImplementationCost)> GetOrchestratorDatesAsync(
+        string baseUrl,
+        int workItemId,
+        string patToken,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Starting for work item {workItemId}");
+
+            using var commentsRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"{baseUrl}/workItems/{workItemId}/comments?api-version=7.1-preview.3");
+            ApplyPatHeader(commentsRequest, patToken);
+
+            System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Request URL: {commentsRequest.RequestUri}");
+
+            using var commentsResponse = await httpClient.SendAsync(commentsRequest, cancellationToken);
+
+            System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Response Status: {commentsResponse.StatusCode}");
+
+            if (!commentsResponse.IsSuccessStatusCode)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Comments API failed for work item {workItemId}: {commentsResponse.StatusCode}");
+                return (null, null, null);
+            }
+
+            var responseContent = await commentsResponse.Content.ReadAsStringAsync(cancellationToken);
+            System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Response Content Length: {responseContent?.Length ?? 0}");
+
+            if (responseContent?.Length > 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Response Content (first 500 chars): {responseContent.Substring(0, Math.Min(500, responseContent.Length))}");
+            }
+
+            if (string.IsNullOrEmpty(responseContent))
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Comments API returned empty response for work item {workItemId}");
+                return (null, null, null);
+            }
+
+            CommentsResponse? commentsData = null;
+            try
+            {
+                commentsData = JsonSerializer.Deserialize<CommentsResponse>(responseContent, JsonOptions);
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] JSON Deserialized successfully");
+            }
+            catch (Exception jsonEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] JSON Deserialization Error: {jsonEx.Message}");
+                return (null, null, null);
+            }
+
+            // Handle both "value" and "comments" property names
+            var commentsList = commentsData?.Value ?? commentsData?.Comments;
+            System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Comments list count: {commentsList?.Count ?? 0}");
+
+            if (commentsList is null || commentsList.Count == 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] No comments found for work item {workItemId}");
+                return (null, null, null);
+            }
+
+            // Log all comments for debugging
+            for (int i = 0; i < commentsList.Count; i++)
+            {
+                var comment = commentsList[i];
+                var commentContent = comment.Content ?? comment.Text;
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Comment {i}: CreatedDate={comment.CreatedDate}, Content={commentContent?.Substring(0, Math.Min(100, commentContent?.Length ?? 0)) ?? "null"}");
+            }
+
+            // Find the first comment from orchestrator that contains "plan approved"
+            var approvalComment = commentsList.FirstOrDefault(c =>
+            {
+                var content = c.Content ?? c.Text;
+                return !string.IsNullOrEmpty(content) &&
+                    content.Contains("plan approved", StringComparison.OrdinalIgnoreCase) &&
+                    content.Contains("orchestrator", StringComparison.OrdinalIgnoreCase) &&
+                    c.CreatedDate.HasValue;
+            });
+
+            DateTimeOffset? approvalDate = null;
+            if (approvalComment?.CreatedDate is not null)
+            {
+                approvalDate = approvalComment.CreatedDate;
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✓ FOUND orchestrator approval date for work item {workItemId}: {approvalDate}");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✗ No orchestrator approval comment found for work item {workItemId}");
+            }
+
+            // Find the first comment from orchestrator that contains "Implementation complete"
+            var completionComment = commentsList.FirstOrDefault(c =>
+            {
+                var content = c.Content ?? c.Text;
+                return !string.IsNullOrEmpty(content) &&
+                    content.Contains("implementation complete", StringComparison.OrdinalIgnoreCase) &&
+                    content.Contains("orchestrator", StringComparison.OrdinalIgnoreCase) &&
+                    c.CreatedDate.HasValue;
+            });
+
+            DateTimeOffset? completionDate = null;
+            if (completionComment?.CreatedDate is not null)
+            {
+                completionDate = completionComment.CreatedDate;
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✓ FOUND orchestrator completion date for work item {workItemId}: {completionDate}");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✗ No orchestrator completion comment found for work item {workItemId}");
+            }
+
+            var implementationCost = ExtractImplementationCost(commentsList);
+            return (approvalDate, completionDate, implementationCost);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✗ Exception for work item {workItemId}: {ex.Message}\n{ex.StackTrace}");
+            return (null, null, null);
+        }
+    }
+
+    private static string? ExtractImplementationCost(List<CommentDto>? commentsList)
+    {
+        if (commentsList is null || commentsList.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var comment in commentsList)
+        {
+            var content = comment.Content ?? comment.Text;
+            if (string.IsNullOrEmpty(content))
+            {
+                continue;
+            }
+
+            // Look for "Total Claude cost: $XX.XX" pattern
+            if (content.Contains("Total Claude cost", StringComparison.OrdinalIgnoreCase))
+            {
+                // Extract the cost value using regex
+                var match = System.Text.RegularExpressions.Regex.Match(
+                    content,
+                    @"Total\s+Claude\s+cost:\s*\$?([\d,]+\.?\d*)",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                if (match.Success && match.Groups.Count > 1)
+                {
+                    return match.Groups[1].Value;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static string GetFieldString(Dictionary<string, object?> fields, string fieldName)
@@ -412,6 +593,28 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         public Dictionary<string, object?>? Attributes { get; init; }
     }
 
+    private sealed class CommentsResponse
+    {
+        // Handle both "value" (standard ADO REST response) and "comments" (alternative format)
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public List<CommentDto>? Value { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("comments")]
+        public List<CommentDto>? Comments { get; init; }
+    }
+
+    private sealed class CommentDto
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("content")]
+        public string? Content { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("text")]
+        public string? Text { get; init; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("createdDate")]
+        public DateTimeOffset? CreatedDate { get; init; }
+    }
+
     public async Task LoadImplementationDetailsAsync(
         DevOpsStoryItem story,
         string organization,
@@ -431,6 +634,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         story.StartDate = revisionMetadata.StartDate;
         story.CompletionDate = revisionMetadata.CompletionDate;
         story.OrchestratorPhaseUpdated = revisionMetadata.OrchestratorPhaseUpdated;
+        story.ImplementationCost = revisionMetadata.ImplementationCost;
         story.ImplementationDetailsLoaded = true;
     }
 
@@ -439,5 +643,6 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         public DateTimeOffset? StartDate { get; init; }
         public DateTimeOffset? CompletionDate { get; init; }
         public DateTimeOffset? OrchestratorPhaseUpdated { get; init; }
+        public string? ImplementationCost { get; init; }
     }
 }

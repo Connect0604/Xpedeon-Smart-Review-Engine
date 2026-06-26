@@ -6,7 +6,7 @@
     <header class="dashboard-hero">
         <div class="dashboard-hero__title">
             <div class="dashboard-hero__topline">
-                <h1>Dashboard</h1>
+                <p class="dashboard-kicker">Orchestrator Dashboard</p>
             </div>
             <div class="dashboard-connection-pill dashboard-connection-pill--@ConnectionStatusCssClass">
                 <span class="dashboard-connection-pill__dot"></span>
@@ -84,7 +84,7 @@
                                         var progress = GetProgressPercentage(story.OrchestratorPhase);
                                         var phaseStageInfo = GetPhaseStageInfo(story.OrchestratorPhase);
                                         <tr>
-                                            <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps">#@story.Id</a></td>
+                                            <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps" class="story-id-badge">@story.Id</a></td>
                                             <td>@story.Title</td>
                                             <td>@DisplayOrDash(story.Mfe)</td>
                                             <td>@DisplayOrDash(story.AssignedTo)</td>
@@ -181,14 +181,16 @@
                                         <th>Execution Mode</th>
                                         <th>Orchestrator Phase</th>
                                         <th>Implementation Time</th>
+                                        <th>Implementation Cost</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     @foreach (var story in FilteredStories)
                                     {
                                         var implTime = FormatImplementationTime(story.ImplementationDuration);
+                                        var implCost = FormatImplementationCost(story.ImplementationCost);
                                         <tr>
-                                            <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps">#@story.Id</a></td>
+                                            <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps" class="story-id-badge">@story.Id</a></td>
                                             <td>@story.Title</td>
                                             <td>@DisplayOrDash(story.AssignedTo)</td>
                                             <td>@DisplayOrDash(story.State)</td>
@@ -196,6 +198,7 @@
                                             <td>@DisplayOrDash(story.ExecutionMode)</td>
                                             <td>@DisplayOrDash(story.OrchestratorPhase)</td>
                                             <td title="@FormatImplementationTimeTooltip(story.StartDate, story.CompletionDate)">@implTime</td>
+                                            <td>@implCost</td>
                                         </tr>
                                     }
                                 </tbody>

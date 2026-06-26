@@ -53,7 +53,8 @@ internal static class OrchestratorPhaseProgressHelper
         { "UI QA", 80 },
         { "Inserting Messages", 88 },
         { "Creating PRs", 92 },
-        { "Awaiting PR Review", 95 },
+        { "Awaiting PR Review", 94 },
+        { "Full QA", 95 },
         { "Complete", 100 }
     };
 
@@ -68,8 +69,9 @@ internal static class OrchestratorPhaseProgressHelper
         new PhaseStage { StageNumber = 7, StageName = "UI Implementation Complete", PhaseReached = "UI QA", Progress = 80 },
         new PhaseStage { StageNumber = 8, StageName = "UI QA Complete", PhaseReached = "Inserting Messages", Progress = 88 },
         new PhaseStage { StageNumber = 9, StageName = "Message Insertion Complete", PhaseReached = "Creating PRs", Progress = 92 },
-        new PhaseStage { StageNumber = 10, StageName = "PRs Created", PhaseReached = "Awaiting PR Review", Progress = 95 },
-        new PhaseStage { StageNumber = 11, StageName = "Implementation Complete", PhaseReached = "Complete", Progress = 100 }
+        new PhaseStage { StageNumber = 10, StageName = "PRs Created", PhaseReached = "Awaiting PR Review", Progress = 94 },
+        new PhaseStage { StageNumber = 11, StageName = "UI QA Complete", PhaseReached = "Full QA", Progress = 95 },
+        new PhaseStage { StageNumber = 12, StageName = "Implementation Complete", PhaseReached = "Complete", Progress = 100 }
     };
 
     /// <summary>
