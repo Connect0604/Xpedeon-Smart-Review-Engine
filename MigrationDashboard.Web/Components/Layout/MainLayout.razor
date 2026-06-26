@@ -1,0 +1,46 @@
+@inherits LayoutComponentBase
+
+<div class="app-shell migration-shell">
+    <aside class="app-shell__sidebar">
+        <div class="app-shell__brand">
+            <span class="app-shell__eyebrow">Xpedeon</span>
+            <strong>Smart Review Engine</strong>
+        </div>
+
+        <nav class="app-shell__nav" aria-label="Primary">
+            <NavLink href="/" Match="NavLinkMatch.All" class="app-shell__nav-link">
+                <span>Migration Dashboard</span>
+            </NavLink>
+            <NavLink href="/dashboard" class="app-shell__nav-link">
+                <span>Orchestrator Dashboard</span>
+            </NavLink>
+            <NavLink href="/review" class="app-shell__nav-link">
+                <span>Smart Review</span>
+            </NavLink>
+        </nav>
+    </aside>
+
+    <main class="app-shell__content migration-shell__content">
+        <div class="app-frame">
+            <header class="app-header">
+                <div class="app-header-title">
+                    <p class="app-kicker">Blazor Migration Dashboard</p>
+                </div>
+                <div class="app-header-search">
+                    <SectionOutlet SectionName="HeaderActions" />
+                </div>
+                <div class="app-header-spacer" aria-hidden="true"></div>
+            </header>
+
+            <main class="app-main">
+                @Body
+            </main>
+        </div>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">x</span>
+</div>

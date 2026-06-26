@@ -123,6 +123,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 OrchestratorPhase = orchestratorPhase,
                 OrchestratorPhaseUpdated = revisionMetadata.OrchestratorPhaseUpdated,
                 StartDate = revisionMetadata.StartDate,
+                CompletionDate = revisionMetadata.CompletionDate,
                 Mfe = mfe,
                 ExecutionMode = executionMode,
                 WorkItemUrl = $"https://dev.azure.com/{Uri.EscapeDataString(organization)}/{Uri.EscapeDataString(project)}/_workitems/edit/{item.Id}",
@@ -299,6 +300,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         string? previousState = null;
         string? previousPhase = null;
         DateTimeOffset? startDate = null;
+        DateTimeOffset? completionDate = null;
         DateTimeOffset? phaseUpdated = null;
 
         foreach (var revision in revisionsData.Value)
@@ -316,6 +318,15 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 startDate = changedDate;
             }
 
+            if (startDate is not null &&
+                completionDate is null &&
+                changedDate is not null &&
+                string.Equals(currentState, "Testing Requested", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(previousState, "Testing Requested", StringComparison.OrdinalIgnoreCase))
+            {
+                completionDate = changedDate;
+            }
+
             if (!string.IsNullOrWhiteSpace(previousPhase) &&
                 !string.Equals(previousPhase, currentPhase, StringComparison.OrdinalIgnoreCase) &&
                 changedDate is not null)
@@ -330,6 +341,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         return new StoryRevisionMetadata
         {
             StartDate = startDate,
+            CompletionDate = completionDate,
             OrchestratorPhaseUpdated = phaseUpdated
         };
     }
@@ -400,9 +412,32 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         public Dictionary<string, object?>? Attributes { get; init; }
     }
 
+    public async Task LoadImplementationDetailsAsync(
+        DevOpsStoryItem story,
+        string organization,
+        string project,
+        string patToken,
+        CancellationToken cancellationToken)
+    {
+        if (story.ImplementationDetailsLoaded)
+        {
+            return;
+        }
+
+        var baseUrl = $"https://dev.azure.com/{organization}/{project}/_apis/wit";
+        var revisionMetadata = await GetRevisionMetadataAsync(baseUrl, story.Id, patToken, cancellationToken);
+
+        // Update the story with loaded implementation details
+        story.StartDate = revisionMetadata.StartDate;
+        story.CompletionDate = revisionMetadata.CompletionDate;
+        story.OrchestratorPhaseUpdated = revisionMetadata.OrchestratorPhaseUpdated;
+        story.ImplementationDetailsLoaded = true;
+    }
+
     private sealed class StoryRevisionMetadata
     {
         public DateTimeOffset? StartDate { get; init; }
+        public DateTimeOffset? CompletionDate { get; init; }
         public DateTimeOffset? OrchestratorPhaseUpdated { get; init; }
     }
 }

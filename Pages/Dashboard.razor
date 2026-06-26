@@ -1,4 +1,4 @@
-@page "/"
+@page "/dashboard"
 
 <PageTitle>Orchestrator Dashboard</PageTitle>
 
@@ -75,11 +75,14 @@
                                         <th>Assigned To</th>
                                         <th>Execution Mode</th>
                                         <th>Orchestrator Phase</th>
+                                        <th>Progress</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     @foreach (var story in RunningStories)
                                     {
+                                        var progress = GetProgressPercentage(story.OrchestratorPhase);
+                                        var phaseStageInfo = GetPhaseStageInfo(story.OrchestratorPhase);
                                         <tr>
                                             <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps">#@story.Id</a></td>
                                             <td>@story.Title</td>
@@ -87,6 +90,23 @@
                                             <td>@DisplayOrDash(story.AssignedTo)</td>
                                             <td>@DisplayOrDash(story.ExecutionMode)</td>
                                             <td>@DisplayOrDash(story.OrchestratorPhase)</td>
+                                            <td>
+                                                <div class="orchestrator-progress-container">
+                                                    <div class="orchestrator-progress-bar-wrapper">
+                                                        <div class="orchestrator-progress-bar" style="width: @progress%">
+                                                            <div class="orchestrator-progress-bar-fill"></div>
+                                                        </div>
+                                                        <div class="orchestrator-progress-bar-bg"></div>
+                                                    </div>
+                                                    <div class="orchestrator-progress-info">
+                                                        <span class="orchestrator-progress-percentage">@progress%</span>
+                                                        @if (phaseStageInfo != null)
+                                                        {
+                                                            <span class="orchestrator-progress-stage" title="@phaseStageInfo.StageName">@phaseStageInfo.StageName</span>
+                                                        }
+                                                    </div>
+                                                </div>
+                                            </td>
                                         </tr>
                                     }
                                 </tbody>
@@ -119,6 +139,15 @@
                             <span>Stories: <strong>@Stories.Count</strong></span>
                             <span>Visible: <strong>@FilteredStories.Count</strong></span>
                         </div>
+                        @if (!AllImplementationDetailsLoaded && Stories.Count > 0)
+                        {
+                            <button type="button"
+                                    class="dashboard-load-all-details-btn"
+                                    @onclick="LoadAllImplementationDetailsAsync"
+                                    disabled="@IsLoadingAllImplementationDetails">
+                                @(IsLoadingAllImplementationDetails ? "Loading Implementation Details..." : "Load Implementation Details")
+                            </button>
+                        }
                     </div>
 
                     @if (FilteredStories.Count == 0)
@@ -151,11 +180,13 @@
                                         <th>MFE</th>
                                         <th>Execution Mode</th>
                                         <th>Orchestrator Phase</th>
+                                        <th>Implementation Time</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     @foreach (var story in FilteredStories)
                                     {
+                                        var implTime = FormatImplementationTime(story.ImplementationDuration);
                                         <tr>
                                             <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps">#@story.Id</a></td>
                                             <td>@story.Title</td>
@@ -164,6 +195,7 @@
                                             <td>@DisplayOrDash(story.Mfe)</td>
                                             <td>@DisplayOrDash(story.ExecutionMode)</td>
                                             <td>@DisplayOrDash(story.OrchestratorPhase)</td>
+                                            <td title="@FormatImplementationTimeTooltip(story.StartDate, story.CompletionDate)">@implTime</td>
                                         </tr>
                                     }
                                 </tbody>

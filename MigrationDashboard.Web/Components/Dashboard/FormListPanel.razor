@@ -1,0 +1,108 @@
+@using MigrationDashboard.Web.Models
+
+<section class="panel form-list-panel">
+    <div class="rail-header">
+        <p class="eyebrow">Forms</p>
+        <span class="rail-count">@Forms.Count</span>
+    </div>
+
+    <div class="rail-filter-row">
+        <label class="section-filter-label rail-filter-label" for="event-badge-filter">Event Status</label>
+        <select id="event-badge-filter"
+                data-testid="event-badge-filter"
+                class="form-select form-select-sm rail-filter-select"
+                value="@(CurrentEventBadgeFilter ?? string.Empty)"
+                @onchange="args => EventBadgeFilterChanged.InvokeAsync(args.Value?.ToString())">
+            <option value="">All event states</option>
+            <option value="@ReviewStatuses.Pending">Pending</option>
+            <option value="@ReviewStatuses.Actioned">Actioned</option>
+            <option value="@ReviewStatuses.Dismissed">Dismissed</option>
+        </select>
+    </div>
+
+    <div class="form-list-scroll-region" data-testid="forms-scroll-region">
+        @if (Forms.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No forms found.</strong>
+            </div>
+        }
+        else
+        {
+        <div class="form-list">
+            @foreach (var form in Forms)
+            {
+                var eventReviewState = EventReviewStatesByForm.GetValueOrDefault(form.FormId);
+
+                <button type="button"
+                        data-testid="form-list-item"
+                        data-form-id="@form.FormId"
+                        class="form-list-item @(form.FormId == SelectedFormId ? "selected" : null)"
+                        @onclick="() => SelectForm.InvokeAsync(form.FormId)">
+                    <span class="form-list-item-main">
+                        <span class="form-name-row">
+                            <span class="form-name" title="@form.FormName">@form.FormName</span>
+                            @if (eventReviewState is not null)
+                            {
+                                <span class="form-event-indicator @GetEventIndicatorClass(eventReviewState)"
+                                      data-testid="form-event-indicator"
+                                      title="@GetEventIndicatorTitle(eventReviewState)"
+                                      aria-label="@GetEventIndicatorTitle(eventReviewState)">@GetEventIndicatorLabel(eventReviewState)</span>
+                            }
+                        </span>
+                        <span class="form-meta">@GetDisplayValue(form.ProcessCode) / @GetDisplayValue(form.StepCode)</span>
+                    </span>
+                    @if (string.Equals(form.Status, "M", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <span class="status-chip form-list-status" data-testid="form-status-chip">@form.Status</span>
+                    }
+                </button>
+            }
+        </div>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter] public required IReadOnlyList<MigrationFormListItem> Forms { get; set; }
+    [Parameter] public IReadOnlyDictionary<int, string> EventReviewStatesByForm { get; set; } = new Dictionary<int, string>();
+    [Parameter] public string? CurrentEventBadgeFilter { get; set; }
+    [Parameter] public EventCallback<string?> EventBadgeFilterChanged { get; set; }
+    [Parameter] public int? SelectedFormId { get; set; }
+    [Parameter] public EventCallback<int> SelectForm { get; set; }
+
+    private static string GetDisplayValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Not set" : value;
+    }
+
+    private static string? GetEventIndicatorClass(string eventReviewState)
+    {
+        return eventReviewState switch
+        {
+            ReviewStatuses.Pending => "form-event-indicator-pending",
+            ReviewStatuses.Dismissed => "form-event-indicator-dismissed",
+            _ => null
+        };
+    }
+
+    private static string GetEventIndicatorLabel(string eventReviewState)
+    {
+        return eventReviewState switch
+        {
+            ReviewStatuses.Dismissed => "Dismissed",
+            ReviewStatuses.Actioned => "Actioned",
+            _ => "Pending"
+        };
+    }
+
+    private static string GetEventIndicatorTitle(string eventReviewState)
+    {
+        return eventReviewState switch
+        {
+            ReviewStatuses.Dismissed => "All linked events are dismissed",
+            ReviewStatuses.Actioned => "Linked events are actioned or dismissed",
+            _ => "This form has linked events pending review"
+        };
+    }
+}

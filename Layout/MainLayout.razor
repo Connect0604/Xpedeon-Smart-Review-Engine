@@ -1,18 +1,34 @@
 @inherits LayoutComponentBase
 
-<div class="app-shell">
+<div class="app-shell @(isSidebarCollapsed ? "app-shell--sidebar-collapsed" : null)">
     <aside class="app-shell__sidebar">
-        <div class="app-shell__brand">
-            <span class="app-shell__eyebrow">Xpedeon</span>
-            <strong>Smart Review Engine</strong>
+        <div class="app-shell__topbar">
+            <div class="app-shell__brand">
+                <span class="app-shell__eyebrow">Xpedeon</span>
+                <strong>Smart Review Engine</strong>
+            </div>
+
+            <button type="button"
+                    class="app-shell__collapse-button"
+                    aria-label="@(isSidebarCollapsed ? "Expand navigation" : "Collapse navigation")"
+                    title="@(isSidebarCollapsed ? "Expand navigation" : "Collapse navigation")"
+                    @onclick="ToggleSidebar">
+                <span aria-hidden="true">‹</span>
+            </button>
         </div>
 
         <nav class="app-shell__nav" aria-label="Primary">
             <NavLink href="/" Match="NavLinkMatch.All" class="app-shell__nav-link">
-                <span>Orchestrator Dashboard</span>
+                <span class="app-shell__nav-icon" aria-hidden="true">M</span>
+                <span class="app-shell__nav-label">Migration Dashboard</span>
+            </NavLink>
+            <NavLink href="/dashboard" class="app-shell__nav-link">
+                <span class="app-shell__nav-icon" aria-hidden="true">O</span>
+                <span class="app-shell__nav-label">Orchestrator Dashboard</span>
             </NavLink>
             <NavLink href="/review" class="app-shell__nav-link">
-                <span>Smart Review</span>
+                <span class="app-shell__nav-icon" aria-hidden="true">S</span>
+                <span class="app-shell__nav-label">Smart Review</span>
             </NavLink>
         </nav>
     </aside>
@@ -21,3 +37,12 @@
         @Body
     </main>
 </div>
+
+@code {
+    private bool isSidebarCollapsed;
+
+    private void ToggleSidebar()
+    {
+        isSidebarCollapsed = !isSidebarCollapsed;
+    }
+}

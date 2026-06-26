@@ -1,0 +1,62 @@
+@using MigrationDashboard.Web.Models
+
+<section class="panel form-summary-card" data-testid="form-summary">
+    @if (Form is null)
+    {
+        <div class="empty-state">
+            <strong>Select a form.</strong>
+            <p>The details panel will load the migration ownership map for the chosen form.</p>
+        </div>
+    }
+    else
+    {
+        <div class="summary-band" data-testid="summary-band">
+            <div class="summary-band-primary">
+                <p class="eyebrow">Selected Form</p>
+                <h2>@Form.FormName</h2>
+            </div>
+
+            <dl class="summary-band-details">
+                <div class="summary-band-item">
+                    <dt>Process</dt>
+                    <dd>@GetDisplayValue(Form.ProcessCode)</dd>
+                </div>
+                <div class="summary-band-item">
+                    <dt>Step</dt>
+                    <dd>@GetDisplayValue(Form.StepCode)</dd>
+                </div>
+                <div class="summary-band-item">
+                    <dt>Handoff</dt>
+                    <dd>@(Form.HandoffDate?.ToString("yyyy-MM-dd") ?? "Not set")</dd>
+                </div>
+                <div class="summary-band-item">
+                    <dt>Ownership Updated</dt>
+                    <dd>@GetOwnershipUpdatedDisplayValue(Form.ownership_updated)</dd>
+                </div>
+                <div class="summary-band-item summary-band-item-remarks">
+                    <dt>Remarks</dt>
+                    <dd data-testid="summary-remarks"
+                        title="@(string.IsNullOrWhiteSpace(Form.Remarks) ? "No remarks yet" : Form.Remarks)">
+                        @(string.IsNullOrWhiteSpace(Form.Remarks) ? "No remarks yet" : Form.Remarks)
+                    </dd>
+                </div>
+            </dl>
+
+            <span class="status-chip summary-band-status">Status @Form.Status</span>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter] public MigrationFormDetail? Form { get; set; }
+
+    private static string GetDisplayValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Not set" : value;
+    }
+
+    private static string GetOwnershipUpdatedDisplayValue(string? value)
+    {
+        return string.Equals(value, "Y", StringComparison.OrdinalIgnoreCase) ? "Yes" : "No";
+    }
+}

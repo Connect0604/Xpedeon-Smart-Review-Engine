@@ -1,0 +1,56 @@
+@if (Visible)
+{
+    <div class="editor-dialog-backdrop">
+        <div class="editor-dialog" data-testid="editor-login-dialog">
+            <h3>Edit Mode Login</h3>
+
+            <form method="post" action="/editor/login" autocomplete="off">
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+
+                <label class="field-label" for="editor-login-user-name">Username</label>
+                <input type="text"
+                       @key="Visible"
+                       id="editor-login-user-name"
+                       name="UserName"
+                       data-testid="editor-login-user-name"
+                       class="form-control"
+                       value="@UserName"
+                       @oninput="HandleUserNameInput"
+                       autocomplete="off"
+                       spellcheck="false" />
+
+                <label class="field-label mt-3" for="editor-login-password">Password</label>
+                <input type="password"
+                       id="editor-login-password"
+                       name="Password"
+                       data-testid="editor-login-password"
+                       class="form-control"
+                       autocomplete="off" />
+
+                @if (!string.IsNullOrWhiteSpace(ValidationMessage))
+                {
+                    <p class="validation-message">@ValidationMessage</p>
+                }
+
+                <div class="dialog-actions">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel">Cancel</button>
+                    <button type="submit" class="btn btn-primary" data-testid="editor-login-submit">Sign In</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public string UserName { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> UserNameChanged { get; set; }
+    [Parameter] public string? ValidationMessage { get; set; }
+    [Parameter] public string ReturnUrl { get; set; } = "/dashboard?enterEditMode=true";
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private Task HandleUserNameInput(ChangeEventArgs e)
+    {
+        return UserNameChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty);
+    }
+}

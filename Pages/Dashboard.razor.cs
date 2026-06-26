@@ -26,10 +26,14 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private string LoadError = string.Empty;
     private string ConnectionStatus = "Idle";
     private bool IsLoadingStories;
+    private bool IsLoadingAllImplementationDetails;
     private List<DevOpsStoryItem> Stories = new();
     private PeriodicTimer? AutoReloadTimer;
     private bool AutoReloadEnabled;
     private int ReloadIntervalSeconds = 300;
+
+    private bool AllImplementationDetailsLoaded =>
+        Stories.Count == 0 || Stories.All(s => s.ImplementationDetailsLoaded);
 
     private List<DevOpsStoryItem> FilteredStories =>
         DevOpsDashboardStoryFilter.Apply(Stories, SearchText, StateFilter).ToList();
@@ -97,8 +101,8 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
 
         try
         {
-            // Load stories WITHOUT revision metadata for fast dashboard loading
-            // Revision metadata requires 200+ API calls and is not essential for status dashboard
+            // Load stories WITHOUT revision metadata on initial load for better performance
+            // Implementation details will be loaded on-demand when user clicks "Load Details"
             Stories = await AzureDevOpsService.GetStoriesWithAttachmentsAsync(
                 DevOpsOrganization.Trim(),
                 DevOpsProject.Trim(),
@@ -126,6 +130,62 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
 
     private static string DisplayOrDash(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "-" : value;
+
+    private static int GetProgressPercentage(string phase) =>
+        OrchestratorPhaseProgressHelper.GetProgressPercentage(phase);
+
+    private static OrchestratorPhaseProgressHelper.PhaseStage? GetPhaseStageInfo(string phase) =>
+        OrchestratorPhaseProgressHelper.GetPhaseStageInfo(phase);
+
+    private static string FormatImplementationTime(TimeSpan? duration) =>
+        ImplementationTimeHelper.FormatDuration(duration);
+
+    private static string FormatImplementationTimeTooltip(DateTimeOffset? startDate, DateTimeOffset? completionDate)
+    {
+        if (startDate is null || completionDate is null)
+        {
+            return "Implementation time tracking started when state changes to 'Testing Requested'";
+        }
+
+        var startLocal = startDate.Value.ToLocalTime();
+        var completionLocal = completionDate.Value.ToLocalTime();
+
+        return $"Started : {startLocal:g}\nCompleted : {completionLocal:g}";
+    }
+
+    private async Task LoadAllImplementationDetailsAsync()
+    {
+        if (IsLoadingAllImplementationDetails || AllImplementationDetailsLoaded)
+        {
+            return;
+        }
+
+        IsLoadingAllImplementationDetails = true;
+
+        try
+        {
+            // Load implementation details for all stories that haven't been loaded yet
+            var tasksToLoad = Stories
+                .Where(s => !s.ImplementationDetailsLoaded)
+                .Select(s => AzureDevOpsService.LoadImplementationDetailsAsync(
+                    s,
+                    DevOpsOrganization.Trim(),
+                    DevOpsProject.Trim(),
+                    DevOpsPatToken.Trim(),
+                    CancellationToken.None))
+                .ToList();
+
+            if (tasksToLoad.Count > 0)
+            {
+                await Task.WhenAll(tasksToLoad);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        finally
+        {
+            IsLoadingAllImplementationDetails = false;
+        }
+    }
 
     private void SetActiveTab(string tabName)
     {

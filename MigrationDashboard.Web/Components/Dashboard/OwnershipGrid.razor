@@ -1,0 +1,159 @@
+@using MigrationDashboard.Web.Models
+@inject DashboardGridOptions GridOptions
+
+<div class="ownership-grid-panel">
+    @if (Rows.Count == 0)
+    {
+        <div class="empty-state">
+            <strong>No objects for this form.</strong>
+            <p>Try removing the filters or pick another form.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-shell" data-testid="ownership-scroll-region">
+            <DxGrid Data="Rows"
+                    CssClass="@GetGridCssClass()"
+                    PageSize="@GetPageSize()"
+                    PagerVisible="false"
+                    ShowSearchBox="false"
+                    FilterMenuButtonDisplayMode="@GetFilterMenuButtonDisplayMode()"
+                    ColumnResizeMode="GridColumnResizeMode.NextColumn"
+                    AllowSort="true">
+                <Columns>
+                    <DxGridDataColumn FieldName="@nameof(EditableOwnershipRow.Layer)" Caption="Layer" Width="90px">
+                        <CellDisplayTemplate Context="cellContext">
+                            @{
+                                var row = (EditableOwnershipRow)cellContext.DataItem;
+                            }
+                            <span class="grid-text-muted">@row.Layer</span>
+                        </CellDisplayTemplate>
+                    </DxGridDataColumn>
+                    <DxGridDataColumn FieldName="@nameof(EditableOwnershipRow.ObjectName)" Caption="Object" Width="320px">
+                        <CellDisplayTemplate Context="cellContext">
+                            @{
+                                var row = (EditableOwnershipRow)cellContext.DataItem;
+                            }
+                            <strong class="grid-text-ellipsis" title="@row.ObjectName">@row.ObjectName</strong>
+                            @if (!string.IsNullOrWhiteSpace(row.StatusMessage))
+                            {
+                                <div class="row-status @(row.HasError ? "error" : "success")">@row.StatusMessage</div>
+                            }
+                        </CellDisplayTemplate>
+                    </DxGridDataColumn>
+                    <DxGridDataColumn FieldName="@nameof(EditableOwnershipRow.ObjectType)" Caption="Type" Width="110px" />
+                    <DxGridDataColumn FieldName="@nameof(EditableOwnershipRow.OwnershipCategory)" Caption="Ownership" Width="140px">
+                        <CellDisplayTemplate Context="cellContext">
+                            @{
+                                var row = (EditableOwnershipRow)cellContext.DataItem;
+                            }
+                            @if (IsEditMode)
+                            {
+                                <select class="form-select form-select-sm grid-editor-control ownership-category-editor"
+                                        data-editor="ownership-category"
+                                        value="@row.OwnershipCategory"
+                                        @onchange="args => UpdateOwnershipCategoryAsync(row, args.Value?.ToString())">
+                                    @foreach (var category in OwnershipCategories.All)
+                                    {
+                                        <option value="@category">@category</option>
+                                    }
+                                </select>
+                            }
+                            else
+                            {
+                                <span class="ownership-text">@row.OwnershipCategory</span>
+                            }
+                        </CellDisplayTemplate>
+                    </DxGridDataColumn>
+                    <DxGridDataColumn FieldName="@nameof(EditableOwnershipRow.Remarks)" Caption="Remarks">
+                        <CellDisplayTemplate Context="cellContext">
+                            @{
+                                var row = (EditableOwnershipRow)cellContext.DataItem;
+                            }
+                            @if (IsEditMode)
+                            {
+                                <textarea class="form-control form-control-sm grid-editor-control ownership-remarks-editor"
+                                          rows="1"
+                                          data-editor="remarks"
+                                          @onchange="args => UpdateRemarksAsync(row, args.Value?.ToString())">@row.Remarks</textarea>
+                            }
+                            else
+                            {
+                                <span class="grid-text-ellipsis ownership-remarks-text"
+                                      title="@GetRemarksTooltip(row.Remarks)">
+                                    @GetRemarksDisplayValue(row.Remarks)
+                                </span>
+                            }
+                        </CellDisplayTemplate>
+                    </DxGridDataColumn>
+                    <DxGridDataColumn FieldName="@nameof(EditableOwnershipRow.ModifiedBy)" Caption="Modified By" Width="120px">
+                        <CellDisplayTemplate Context="cellContext">
+                            @{
+                                var row = (EditableOwnershipRow)cellContext.DataItem;
+                            }
+                            <span class="grid-text-muted">@(row.ModifiedBy ?? "-")</span>
+                        </CellDisplayTemplate>
+                    </DxGridDataColumn>
+                    <DxGridDataColumn FieldName="@nameof(EditableOwnershipRow.ModifiedDate)" Caption="Modified Date" Width="170px" DisplayFormat="yyyy-MM-dd HH:mm">
+                        <CellDisplayTemplate Context="cellContext">
+                            @{
+                                var row = (EditableOwnershipRow)cellContext.DataItem;
+                            }
+                            <span class="grid-text-muted">@(row.ModifiedDate?.ToString("yyyy-MM-dd HH:mm") ?? "-")</span>
+                        </CellDisplayTemplate>
+                    </DxGridDataColumn>
+                </Columns>
+            </DxGrid>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public required IReadOnlyList<EditableOwnershipRow> Rows { get; set; }
+    [Parameter] public bool IsEditMode { get; set; }
+    [Parameter] public EventCallback<EditableOwnershipRow> RowChanged { get; set; }
+
+    private GridFilterMenuButtonDisplayMode GetFilterMenuButtonDisplayMode()
+    {
+        return GridOptions.EnableColumnFiltering
+            ? GridFilterMenuButtonDisplayMode.Always
+            : GridFilterMenuButtonDisplayMode.Never;
+    }
+
+    private string GetGridCssClass()
+    {
+        return IsEditMode
+            ? "dashboard-data-grid ownership-data-grid ownership-data-grid-edit"
+            : "dashboard-data-grid ownership-data-grid";
+    }
+
+    private int GetPageSize()
+    {
+        return Math.Max(1, Rows.Count);
+    }
+
+    private async Task UpdateOwnershipCategoryAsync(EditableOwnershipRow row, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            row.OwnershipCategory = value;
+            await RowChanged.InvokeAsync(row);
+        }
+    }
+
+    private async Task UpdateRemarksAsync(EditableOwnershipRow row, string? value)
+    {
+        row.Remarks = value;
+        await RowChanged.InvokeAsync(row);
+    }
+
+    private static string GetRemarksDisplayValue(string? remarks)
+    {
+        return string.IsNullOrWhiteSpace(remarks) ? "-" : remarks;
+    }
+
+    private static string? GetRemarksTooltip(string? remarks)
+    {
+        return string.IsNullOrWhiteSpace(remarks) ? null : remarks;
+    }
+}
