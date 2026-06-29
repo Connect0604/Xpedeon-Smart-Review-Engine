@@ -218,17 +218,17 @@
         font-weight: 700;
     }
 
-    .srs-orch-phase-badge {
-        display: inline-block;
-        padding: 0.18rem 0.55rem;
-        border-radius: 999px;
-        font-size: 0.74rem;
-        font-weight: 600;
-        background: color-mix(in srgb, var(--srs-bg-info) 18%, transparent);
-        color: var(--srs-text-info);
-        border: 1px solid color-mix(in srgb, var(--srs-bg-info) 40%, transparent);
-        white-space: nowrap;
-    }
+.srs-orch-phase-badge {
+    display: inline-block;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--srs-bg-info) 18%, transparent);
+    color: #8b59ad;
+    border: 1px solid color-mix(in srgb, var(--srs-bg-info) 40%, transparent);
+    white-space: nowrap;
+}
 
     .srs-metric-grid {
         margin-top: 0.75rem;
@@ -339,8 +339,8 @@
     }
 
     .srs-attachment-btn:hover {
-        background: #f3f6fb;
-        border-color: #bfd0ef;
+        background: #faf8fc;
+        border-color: #ddc7f4;
     }
 
     .srs-attachment-btn:disabled {
@@ -441,7 +441,7 @@
     }
 
     .srs-story-id-pill {
-        background: #3b5bdb;
+        background: #8b59ad;
         color: #fff;
         border-radius: 6px;
         padding: 0.28rem 0.6rem;
@@ -455,7 +455,7 @@
 
     .srs-story-type-pill {
         background: #e8edf8;
-        color: #3b5bdb;
+        color: #8b59ad;
         border-radius: 999px;
         padding: 0.24rem 0.6rem;
         font-size: 0.75rem;
@@ -499,7 +499,7 @@
         border-radius: 999px;
         padding: 0.24rem 0.55rem;
         background: #eef2ff;
-        color: var(--srs-text-info);
+        color: #8b59ad;
         font-size: 0.78rem;
         font-weight: 700;
         border: 1px solid #dbe4ff;
@@ -588,8 +588,8 @@
     }
 
     .srs-section-search:focus {
-        border-color: #93b4ee;
-        box-shadow: 0 0 0 3px #dbeafe;
+        border-color: #ddc7f4;
+        box-shadow: 0 0 0 3px #f3ecfb;
     }
 
     .srs-search-clear {
@@ -670,7 +670,7 @@
     .srs-source-chip.active {
         background: #e8f0ff;
         border-color: #b6cdfa;
-        color: #234ea5;
+        color: #8b59ad;
     }
 
     .srs-source-chip-wrap {
@@ -740,42 +740,42 @@
     }
 
     .srs-section-row:hover {
-        background: #f3f6fb;
+        background: #faf8fc;
     }
 
     .srs-section-row.active {
-        background: #eef4ff;
-        box-shadow: inset 3px 0 0 var(--srs-text-info);
+        background: #f3ecfb;
+        box-shadow: inset 3px 0 0 #8b59ad;
     }
 
     .srs-section-row.active .srs-section-title {
-        color: var(--srs-text-info);
+        color: #8b59ad;
         font-weight: 700;
     }
 
     .srs-section-row.scanning {
-        background: #fffbeb;
-        box-shadow: inset 3px 0 0 #f59e0b;
+        background: #f8f3fc;
+        box-shadow: inset 3px 0 0 #8b59ad;
         animation: srs-scan-pulse 1.2s ease-in-out infinite;
     }
 
     .srs-section-row.scanning .srs-section-title {
-        color: #b45309;
+        color: #8b59ad;
         font-weight: 600;
     }
 
     .srs-section-row.scan-done {
-        background: #f0fdf4;
-        box-shadow: inset 3px 0 0 #16a34a;
+        background: #f3ecfb;
+        box-shadow: inset 3px 0 0 #8b59ad;
     }
 
     .srs-section-row.scan-done .srs-section-title {
-        color: #166534;
+        color: #8b59ad;
     }
 
     @keyframes srs-scan-pulse {
-        0%, 100% { background: #fffbeb; }
-        50%       { background: #fef3c7; }
+        0%, 100% { background: #f8f3fc; }
+        50%       { background: #ede3f7; }
     }
 
     .srs-scan-indicator {
@@ -789,12 +789,12 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #f59e0b;
+        background: #8b59ad;
         animation: srs-dot-pulse 0.9s ease-in-out infinite;
     }
 
     .srs-scan-indicator--done {
-        color: #16a34a;
+        color: #8b59ad;
     }
 
     @keyframes srs-dot-pulse {
@@ -813,9 +813,9 @@
     }
 
     .srs-btn-scan {
-        background: #e0f2fe;
-        color: #0369a1;
-        border: 1px solid #7dd3fc;
+        background: #f3ecfb;
+        color: #8b59ad;
+        border: 1px solid #ddc7f4;
         border-radius: 7px;
         padding: 0.35rem 0.75rem;
         font-size: 0.82rem;
@@ -825,7 +825,7 @@
     }
 
     .srs-btn-scan:hover:not(:disabled) {
-        background: #bae6fd;
+        background: #ede3f7;
     }
 
     .srs-btn-scan:disabled {
@@ -900,14 +900,14 @@
 
     .srs-ai-review-pane {
         min-width: 0;
-        background: #f0fdf4;
-        border: 1px solid #bbf7d0;
+        background: #f3ecfb;
+        border: 1px solid #ddc7f4;
         border-radius: 12px;
         padding: 1rem 1.1rem 1.1rem;
     }
 
     .srs-ai-review-pane .srs-stage-title {
-        color: #3b5bdb;
+        color: #8b59ad;
         letter-spacing: 0.1em;
     }
 
@@ -1123,7 +1123,7 @@
         width: 4px;
         height: 4px;
         border-radius: 50%;
-        background: #3b5bdb;
+        background: #8b59ad;
     }
 
     .srs-ai-field-list li:last-child {
@@ -1132,8 +1132,8 @@
 
     .srs-ai-field-list li code,
     .srs-ai-field-list li .srs-inline-code {
-        background: #e8edf8;
-        color: #2d3a8c;
+        background: #f3ecfb;
+        color: #8b59ad;
         padding: 0.1em 0.35em;
         border-radius: 4px;
         font-size: 0.82em;
@@ -1144,7 +1144,7 @@
     .srs-ai-table-wrap {
         overflow-x: auto;
         border-radius: 6px;
-        border: 1px solid #dde3f5;
+        border: 1px solid #ddc7f4;
     }
 
     .srs-ai-table {
@@ -1154,25 +1154,25 @@
     }
 
     .srs-ai-table thead tr {
-        background: #eef2ff;
+        background: #f3ecfb;
     }
 
     .srs-ai-table th {
         text-align: left;
         padding: 0.4rem 0.7rem;
         font-weight: 700;
-        color: #3b4ea6;
-        border-bottom: 1px solid #c7d4f8;
+        color: #8b59ad;
+        border-bottom: 1px solid #ddc7f4;
         white-space: nowrap;
         text-transform: capitalize;
     }
 
     .srs-ai-table tbody tr:nth-child(even) {
-        background: #f8f9ff;
+        background: #faf8fc;
     }
 
     .srs-ai-table tbody tr:hover {
-        background: #eef2ff;
+        background: #f3ecfb;
     }
 
     .srs-ai-table tbody tr.srs-ai-row-missing-poco {
@@ -1451,7 +1451,7 @@
     .srs-mock-tab.active {
         background: #e8efff;
         border-color: #b9c9ef;
-        color: #1f3f86;
+        color: #8b59ad;
         font-weight: 700;
     }
 
@@ -1489,9 +1489,9 @@
     }
 
     .srs-mock-btn {
-        border: 1px solid #244ca2;
+        border: 1px solid #653285;
         border-radius: 6px;
-        background: #2f63d2;
+        background: #8b59ad;
         color: #fff;
         font-size: 0.76rem;
         padding: 0.3rem 0.72rem;
@@ -1499,7 +1499,7 @@
 
     .srs-mock-btn-ghost {
         background: #fff;
-        color: #2f63d2;
+        color: #8b59ad;
     }
 
     .srs-mock-empty-row {
@@ -1511,7 +1511,7 @@
     .srs-mock-chip {
         border-radius: 999px;
         background: #e8f0ff;
-        color: #1e40af;
+        color: #8b59ad;
         padding: 0.15rem 0.5rem;
         font-size: 0.72rem;
         font-weight: 700;
@@ -1559,8 +1559,8 @@
     }
 
     .srs-mock-option:hover {
-        background: #f8fbff;
-        border-color: #bfd0ef;
+        background: #faf8fc;
+        border-color: #ddc7f4;
     }
 
     .srs-mock-option input {
@@ -1616,9 +1616,9 @@
     .srs-compare-progress {
         margin: 0 1rem 1rem;
         padding: 0.6rem 0.75rem 0.7rem;
-        border: 1px solid #c7d8fb;
+        border: 1px solid #ddc7f4;
         border-radius: 10px;
-        background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+        background: linear-gradient(180deg, #faf8fc 0%, #f3ecfb 100%);
     }
 
     .srs-compare-progress-head {
@@ -1626,7 +1626,7 @@
         align-items: center;
         justify-content: space-between;
         font-size: 0.78rem;
-        color: #27426e;
+        color: #8b59ad;
         font-weight: 700;
         margin-bottom: 0.42rem;
     }
@@ -1634,16 +1634,16 @@
     .srs-compare-progress-track {
         height: 10px;
         border-radius: 999px;
-        background: #d9e6ff;
+        background: #e7daf3;
         overflow: hidden;
-        border: 1px solid #c4d7fb;
+        border: 1px solid #ddc7f4;
     }
 
     .srs-compare-progress-fill {
         height: 100%;
         border-radius: 999px;
-        background: linear-gradient(90deg, #2f63d2 0%, #5b88ea 65%, #88abf6 100%);
-        box-shadow: 0 0 12px rgba(47, 99, 210, 0.45);
+        background: linear-gradient(90deg, #8b59ad 0%, #9d7ab9 65%, #ae9ac5 100%);
+        box-shadow: 0 0 12px rgba(139, 89, 173, 0.45);
         position: relative;
         transition: width 240ms ease;
     }
@@ -1712,9 +1712,9 @@
 
     .srs-markdown blockquote {
         margin: 0.65rem 0;
-        border-left: 4px solid var(--srs-text-info);
+        border-left: 4px solid #8b59ad;
         padding: 0.5rem 0.8rem;
-        background: color-mix(in srgb, var(--srs-bg-info) 62%, white 38%);
+        background: color-mix(in srgb, #f3ecfb 62%, white 38%);
         border-radius: 0 var(--srs-radius-md) var(--srs-radius-md) 0;
     }
 
@@ -1731,7 +1731,7 @@
         border-radius: 6px;
         padding: 0.08rem 0.36rem;
         font-size: 0.88em;
-        color: #9f1239;
+        color: #8b59ad;
     }
 
     .srs-search-hit {
@@ -1797,7 +1797,7 @@
     }
 
     .srs-table-wrap tbody tr:hover {
-        background: color-mix(in srgb, var(--srs-bg-info) 32%, white 68%);
+        background: color-mix(in srgb, #f3ecfb 32%, white 68%);
     }
 
     .srs-btn {
@@ -1813,8 +1813,8 @@
     }
 
     .srs-btn:hover {
-        background: #f3f6fb;
-        border-color: #bfd0ef;
+        background: #faf8fc;
+        border-color: #ddc7f4;
     }
 
     .srs-btn:disabled {
@@ -1831,14 +1831,14 @@
     }
 
     .srs-btn-primary {
-        background: #1d4ed8;
-        border-color: #1e40af;
+        background: #8b59ad;
+        border-color: #653285;
         color: white;
     }
 
     .srs-btn-primary:hover {
-        background: #1e40af;
-        border-color: #1e3a8a;
+        background: #653285;
+        border-color: #4b216f;
         color: white;
     }
 
