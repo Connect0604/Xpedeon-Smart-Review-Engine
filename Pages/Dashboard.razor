@@ -83,6 +83,7 @@
                                     {
                                         var progress = GetProgressPercentage(story.OrchestratorPhase);
                                         var phaseStageInfo = GetPhaseStageInfo(story.OrchestratorPhase);
+                                        var progressBarCssClass = GetProgressBarCssClass(story.OrchestratorPhase);
                                         <tr>
                                             <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps" class="story-id-badge">@story.Id</a></td>
                                             <td>@story.Title</td>
@@ -92,7 +93,7 @@
                                             <td>@DisplayOrDash(story.OrchestratorPhase)</td>
                                             <td>
                                                 <div class="orchestrator-progress-container">
-                                                    <div class="orchestrator-progress-bar-wrapper">
+                                                    <div class="orchestrator-progress-bar-wrapper @progressBarCssClass">
                                                         <div class="orchestrator-progress-bar" style="width: @progress%">
                                                             <div class="orchestrator-progress-bar-fill"></div>
                                                         </div>

@@ -1998,3 +1998,13 @@
         text-overflow: ellipsis;
         max-width: 150px;
     }
+
+    /* Error state styling for orchestrator progress bar */
+    .orchestrator-progress-bar-wrapper--error .orchestrator-progress-bar {
+        background: linear-gradient(90deg, #ef4444, #dc2626);
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+    }
+
+    .orchestrator-progress-bar-wrapper--error .orchestrator-progress-percentage {
+        color: #dc2626;
+    }

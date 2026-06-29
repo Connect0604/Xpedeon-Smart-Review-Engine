@@ -137,6 +137,12 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private static OrchestratorPhaseProgressHelper.PhaseStage? GetPhaseStageInfo(string phase) =>
         OrchestratorPhaseProgressHelper.GetPhaseStageInfo(phase);
 
+    private static bool IsErrorPhase(string? phase) =>
+        OrchestratorPhaseProgressHelper.IsErrorPhase(phase);
+
+    private static string GetProgressBarCssClass(string phase) =>
+        IsErrorPhase(phase) ? "orchestrator-progress-bar--error" : string.Empty;
+
     private static string FormatImplementationTime(TimeSpan? duration) =>
         ImplementationTimeHelper.FormatDuration(duration);
 

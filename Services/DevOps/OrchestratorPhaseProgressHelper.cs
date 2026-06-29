@@ -35,7 +35,8 @@ internal static class OrchestratorPhaseProgressHelper
         "Full QA",
         "Awaiting QA Verification",
         "Deploying to Prod",
-        "Complete"
+        "Complete",
+        "Error"
     };
 
     /// <summary>
@@ -56,7 +57,8 @@ internal static class OrchestratorPhaseProgressHelper
         { "Creating PRs", 92 },
         { "Awaiting PR Review", 94 },
         { "Full QA", 95 },
-        { "Complete", 100 }
+        { "Complete", 100 },
+        { "Error", 0 }
     };
 
     private static readonly List<PhaseStage> PhaseStages = new()
@@ -73,13 +75,15 @@ internal static class OrchestratorPhaseProgressHelper
         new PhaseStage { StageNumber = 10, StageName = "Message Insertion Complete", PhaseReached = "Creating PRs", Progress = 92 },
         new PhaseStage { StageNumber = 11, StageName = "PRs Created", PhaseReached = "Awaiting PR Review", Progress = 94 },
         new PhaseStage { StageNumber = 12, StageName = "UI QA Complete", PhaseReached = "Full QA", Progress = 95 },
-        new PhaseStage { StageNumber = 13, StageName = "Implementation Complete", PhaseReached = "Complete", Progress = 100 }
+        new PhaseStage { StageNumber = 13, StageName = "Implementation Complete", PhaseReached = "Complete", Progress = 100 },
+        new PhaseStage { StageNumber = 14, StageName = "Error Encountered", PhaseReached = "Error", Progress = 0 }
     };
 
     /// <summary>
     /// Gets the progress percentage for a given orchestrator phase.
     /// If the phase is an exact milestone, returns its progress.
     /// Otherwise, returns the progress of the last known milestone before this phase in the workflow.
+    /// For "Error" phase, returns the progress of the last milestone before the error occurred.
     /// </summary>
     /// <param name="phase">The orchestrator phase name.</param>
     /// <returns>The progress percentage (0-100), or 0 if the phase is not recognized or comes before the first milestone.</returns>
@@ -137,6 +141,16 @@ internal static class OrchestratorPhaseProgressHelper
     /// Gets all recognized orchestrator phases in order.
     /// </summary>
     public static IReadOnlyList<string> GetAllOrderedPhases() => OrderedPhases.AsReadOnly();
+
+    /// <summary>
+    /// Determines if the given phase is an error phase.
+    /// </summary>
+    /// <param name="phase">The orchestrator phase name.</param>
+    /// <returns>True if the phase is "Error"; otherwise, false.</returns>
+    public static bool IsErrorPhase(string? phase)
+    {
+        return !string.IsNullOrWhiteSpace(phase) && phase.Equals("Error", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Gets all milestone phases and their progress percentages.
