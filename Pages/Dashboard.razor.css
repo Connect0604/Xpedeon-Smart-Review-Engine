@@ -90,6 +90,24 @@
         cursor: not-allowed;
     }
 
+.dashboard-reload-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-direction: row-reverse;
+}
+
+.dashboard-auto-reload-info {
+    font-size: 0.85rem;
+    color: #574668;
+    font-weight: 500;
+    padding: 6px 12px;
+    background: rgba(139, 89, 173, 0.08);
+    border: 1px solid rgba(139, 89, 173, 0.16);
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
 .dashboard-connection-pill {
     display: inline-flex;
     align-items: center;
@@ -625,3 +643,223 @@
     box-shadow: 0 2px 8px rgba(49, 18, 78, 0.2);
 }
 
+/* Phase History Styles */
+.expand-cell {
+    padding: 8px 10px !important;
+    text-align: center;
+}
+
+.expand-button {
+    border: none;
+    background: transparent;
+    color: var(--dashboard-purple-800);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+}
+
+.expand-button:hover {
+    background: rgba(139, 89, 173, 0.1);
+    color: var(--dashboard-purple-700);
+}
+
+.expand-icon {
+    display: inline-block;
+    transition: transform 0.2s ease;
+}
+
+.phase-history-row td {
+    padding: 0 !important;
+    background: #fafafe;
+    border: none;
+}
+
+.phase-history-container {
+    padding: 12px 16px;
+    border-top: 1px solid #ede5f5;
+}
+
+.phase-history-summary {
+    margin-bottom: 12px;
+}
+
+.phase-history-summary h4 {
+    margin: 0 0 8px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #31124e;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.summary-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    color: #73809a;
+}
+
+.summary-item {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.summary-value {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #31124e;
+    word-break: break-word;
+}
+
+.summary-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding: 10px 12px;
+    background: rgba(243, 236, 251, 0.4);
+    border-radius: 6px;
+}
+
+.metric {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.metric-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #573d73;
+}
+
+.metric-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #31124e;
+}
+
+.phase-history-table {
+    margin-top: 20px;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #ede5f5;
+    border-radius: 8px;
+}
+
+.phase-history-table h4 {
+    margin: 0 0 12px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #31124e;
+    position: sticky;
+    top: 0;
+    background: #fafafe;
+    padding: 12px;
+    z-index: 10;
+}
+
+.phases-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.phases-table th {
+    background: linear-gradient(180deg, rgba(243, 236, 251, 0.95) 0%, rgba(237, 229, 245, 0.85) 100%);
+    color: #4b5563;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid #ede5f5;
+}
+
+.phases-table td {
+    padding: 10px 12px 10px 28px;
+    border-bottom: 1px solid #ede5f5;
+}
+
+.phases-table tbody tr {
+    transition: background 0.2s ease;
+}
+
+.phases-table tbody tr:hover {
+    background: rgba(243, 236, 251, 0.8);
+}
+
+.phases-table tr.phase-status--completed {
+    background: rgba(11, 110, 79, 0.05);
+}
+
+.phases-table tr.phase-status--error {
+    background: rgba(201, 58, 58, 0.08);
+}
+
+.phases-table tr.phase-status--in-progress {
+    background: rgba(139, 89, 173, 0.08);
+}
+
+.phases-table tr.phase-status--skipped {
+    background: rgba(153, 153, 153, 0.05);
+}
+
+.phase-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.phase-status.phase-status--completed {
+    background: rgba(11, 110, 79, 0.15);
+    color: #0f6a4b;
+    border: 1px solid rgba(11, 110, 79, 0.3);
+}
+
+.phase-status.phase-status--error {
+    background: rgba(201, 58, 58, 0.15);
+    color: #9d2f2f;
+    border: 1px solid rgba(201, 58, 58, 0.3);
+}
+
+.phase-status.phase-status--in-progress {
+    background: rgba(139, 89, 173, 0.15);
+    color: #573d73;
+    border: 1px solid rgba(139, 89, 173, 0.3);
+}
+
+.phase-status.phase-status--skipped {
+    background: rgba(153, 153, 153, 0.15);
+    color: #666;
+    border: 1px solid rgba(153, 153, 153, 0.3);
+}
+
+.error-marker {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #9d2f2f;
+    cursor: help;
+}

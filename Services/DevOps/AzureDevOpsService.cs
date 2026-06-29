@@ -638,6 +638,112 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         story.ImplementationDetailsLoaded = true;
     }
 
+    public async Task LoadPhaseHistoryAsync(
+        DevOpsStoryItem story,
+        string organization,
+        string project,
+        string patToken,
+        CancellationToken cancellationToken)
+    {
+        if (story.PhaseHistoryLoaded)
+        {
+            return;
+        }
+
+        var baseUrl = $"https://dev.azure.com/{organization}/{project}/_apis/wit";
+        var phaseHistory = await GetPhaseHistoryAsync(baseUrl, story.Id, patToken, cancellationToken);
+
+        story.PhaseHistorySummary = phaseHistory;
+        story.PhaseHistoryLoaded = true;
+    }
+
+    private async Task<PhaseHistorySummary> GetPhaseHistoryAsync(
+        string baseUrl,
+        int workItemId,
+        string patToken,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Fetching phase history for work item {workItemId}");
+
+            // Fetch revision history
+            using var revisionsRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"{baseUrl}/workItems/{workItemId}/revisions?api-version=7.1");
+            ApplyPatHeader(revisionsRequest, patToken);
+
+            using var revisionsResponse = await httpClient.SendAsync(revisionsRequest, cancellationToken);
+            if (!revisionsResponse.IsSuccessStatusCode)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Revisions API failed for work item {workItemId}: {revisionsResponse.StatusCode}");
+                return new PhaseHistorySummary();
+            }
+
+            var revisionsData = await revisionsResponse.Content.ReadFromJsonAsync<RevisionsResponse>(JsonOptions, cancellationToken);
+            if (revisionsData?.Value is null || revisionsData.Value.Count == 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] No revisions found for work item {workItemId}");
+                return new PhaseHistorySummary();
+            }
+
+            // Convert revisions to parser format
+            var revisionEvents = revisionsData.Value
+                .Select(r => new OrchestratorPhaseHistoryParser.RevisionEventDto
+                {
+                    ChangedDate = GetFieldDate(r.Fields, "System.ChangedDate"),
+                    OrchestratorPhase = GetFieldString(r.Fields, "Custom.OrchestratorPhase"),
+                    State = GetFieldString(r.Fields, "System.State")
+                })
+                .ToList();
+
+            // Fetch comments for error information
+            List<OrchestratorPhaseHistoryParser.CommentDto>? commentDtos = null;
+            try
+            {
+                using var commentsRequest = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"{baseUrl}/workItems/{workItemId}/comments?api-version=7.1-preview.3");
+                ApplyPatHeader(commentsRequest, patToken);
+
+                using var commentsResponse = await httpClient.SendAsync(commentsRequest, cancellationToken);
+                if (commentsResponse.IsSuccessStatusCode)
+                {
+                    var commentsData = await commentsResponse.Content.ReadFromJsonAsync<CommentsResponse>(JsonOptions, cancellationToken);
+                    var commentsList = commentsData?.Value ?? commentsData?.Comments;
+
+                    if (commentsList?.Count > 0)
+                    {
+                        commentDtos = commentsList
+                            .Select(c => new OrchestratorPhaseHistoryParser.CommentDto
+                            {
+                                Content = c.Content,
+                                Text = c.Text,
+                                CreatedDate = c.CreatedDate
+                            })
+                            .ToList();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Failed to fetch comments: {ex.Message}");
+                // Continue with just revisions
+            }
+
+            // Parse phase history from revisions and comments
+            var phaseHistory = OrchestratorPhaseHistoryParser.ParsePhaseHistoryFromRevisions(revisionEvents, commentDtos);
+            System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Parsed {phaseHistory.TotalPhases} phases for work item {workItemId}");
+
+            return phaseHistory;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Exception for work item {workItemId}: {ex.Message}\n{ex.StackTrace}");
+            return new PhaseHistorySummary();
+        }
+    }
+
     private sealed class StoryRevisionMetadata
     {
         public DateTimeOffset? StartDate { get; init; }

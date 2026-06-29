@@ -34,4 +34,16 @@ internal sealed class DevOpsStoryItem
     /// The implementation cost extracted from comments (e.g., "Total Claude cost: $65.86")
     /// </summary>
     public string? ImplementationCost { get; set; }
+
+    /// <summary>
+    /// The phase history summary loaded on-demand from orchestrator comments.
+    /// Contains per-phase execution events, timings, and error tracking.
+    /// </summary>
+    public PhaseHistorySummary? PhaseHistorySummary { get; set; }
+
+    /// <summary>
+    /// Tracks whether phase history has been loaded for this story.
+    /// Used for lazy-loading to avoid repeated Azure DevOps calls.
+    /// </summary>
+    public bool PhaseHistoryLoaded { get; set; }
 }

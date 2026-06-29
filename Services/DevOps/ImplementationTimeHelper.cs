@@ -62,6 +62,23 @@ internal static class ImplementationTimeHelper
     }
 
     /// <summary>
+    /// Formats a DateTimeOffset to local time with consistent formatting.
+    /// Converts UTC timestamps from Azure DevOps to local time for display.
+    /// Returns "-" if the value is null.
+    /// </summary>
+    public static string FormatDateTimeOffset(DateTimeOffset? dateTime)
+    {
+        if (dateTime is null)
+        {
+            return "-";
+        }
+
+        // Convert UTC timestamp to local time and format consistently
+        var localTime = dateTime.Value.ToLocalTime();
+        return localTime.ToString("g");
+    }
+
+    /// <summary>
     /// Categorizes implementation time into buckets for reporting.
     /// </summary>
     public static string CategorizeDuration(TimeSpan? duration)
