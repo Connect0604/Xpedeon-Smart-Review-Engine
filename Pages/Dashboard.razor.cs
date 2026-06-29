@@ -31,6 +31,7 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private PeriodicTimer? AutoReloadTimer;
     private bool AutoReloadEnabled;
     private int ReloadIntervalSeconds = 300;
+    private HashSet<int> ExpandedStoryIds = new();
 
     private bool AllImplementationDetailsLoaded =>
         Stories.Count == 0 || Stories.All(s => s.ImplementationDetailsLoaded);
@@ -137,6 +138,12 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private static OrchestratorPhaseProgressHelper.PhaseStage? GetPhaseStageInfo(string phase) =>
         OrchestratorPhaseProgressHelper.GetPhaseStageInfo(phase);
 
+    private static bool IsErrorPhase(string? phase) =>
+        OrchestratorPhaseProgressHelper.IsErrorPhase(phase);
+
+    private static string GetProgressBarCssClass(string phase) =>
+        IsErrorPhase(phase) ? "orchestrator-progress-bar--error" : string.Empty;
+
     private static string FormatImplementationTime(TimeSpan? duration) =>
         ImplementationTimeHelper.FormatDuration(duration);
 
@@ -193,6 +200,96 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private void SetActiveTab(string tabName)
     {
         ActiveTab = tabName;
+    }
+
+    private async Task LoadPhaseHistoryAsync(DevOpsStoryItem story)
+    {
+        if (story.PhaseHistoryLoaded)
+        {
+            // Already loaded, just toggle expansion
+            ToggleExpansion(story.Id);
+            return;
+        }
+
+        try
+        {
+            await AzureDevOpsService.LoadPhaseHistoryAsync(
+                story,
+                DevOpsOrganization.Trim(),
+                DevOpsProject.Trim(),
+                DevOpsPatToken.Trim(),
+                CancellationToken.None);
+
+            ToggleExpansion(story.Id);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error loading phase history: {ex.Message}");
+        }
+    }
+
+    private void ToggleExpansion(int storyId)
+    {
+        if (ExpandedStoryIds.Contains(storyId))
+        {
+            ExpandedStoryIds.Remove(storyId);
+        }
+        else
+        {
+            ExpandedStoryIds.Add(storyId);
+        }
+    }
+
+    private bool IsStoryExpanded(int storyId) => ExpandedStoryIds.Contains(storyId);
+
+    private string FormatReloadInterval(int seconds)
+    {
+        return seconds >= 60
+            ? $"{Math.Round(seconds / 60.0, 1)}m"
+            : $"{seconds}s";
+    }
+
+    private static string FormatPhaseStatus(PhaseStatus status) =>
+        status switch
+        {
+            PhaseStatus.Completed => "Completed",
+            PhaseStatus.InProgress => "In Progress",
+            PhaseStatus.Error => "Error",
+            PhaseStatus.Skipped => "Skipped",
+            _ => "Unknown"
+        };
+
+    private static string GetPhaseStatusCssClass(PhaseStatus status) =>
+        status switch
+        {
+            PhaseStatus.Completed => "phase-status--completed",
+            PhaseStatus.Error => "phase-status--error",
+            PhaseStatus.InProgress => "phase-status--in-progress",
+            PhaseStatus.Skipped => "phase-status--skipped",
+            _ => string.Empty
+        };
+
+    private static decimal GetSuccessRatePercentage(decimal rate) =>
+        Math.Round(rate, 1);
+
+    private static string StripHtmlTags(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return string.Empty;
+
+        // Remove HTML tags using regex
+        var tagPattern = System.Text.RegularExpressions.Regex.Unescape("<.*?>");
+        var result = System.Text.RegularExpressions.Regex.Replace(input, tagPattern, string.Empty);
+
+        // Decode HTML entities
+        result = System.Net.WebUtility.HtmlDecode(result);
+
+        // Remove extra whitespace
+        result = System.Text.RegularExpressions.Regex.Replace(result, @"\s+", " ").Trim();
+
+        // Limit length for tooltip
+        return result.Length > 200 ? result.Substring(0, 200) + "..." : result;
     }
 
     private void StartAutoReload()
