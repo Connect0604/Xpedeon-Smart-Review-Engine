@@ -667,28 +667,58 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         {
             System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Fetching phase history for work item {workItemId}");
 
-            // Fetch revision history
-            using var revisionsRequest = new HttpRequestMessage(
-                HttpMethod.Get,
-                $"{baseUrl}/workItems/{workItemId}/revisions?api-version=7.1");
-            ApplyPatHeader(revisionsRequest, patToken);
+            // Fetch revision history with pagination support
+            var allRevisions = new List<RevisionDto>();
+            int skip = 0;
+            const int pageSize = 200; // Azure DevOps default is 100, let's fetch more per page
 
-            using var revisionsResponse = await httpClient.SendAsync(revisionsRequest, cancellationToken);
-            if (!revisionsResponse.IsSuccessStatusCode)
+            while (true)
             {
-                System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Revisions API failed for work item {workItemId}: {revisionsResponse.StatusCode}");
-                return new PhaseHistorySummary();
+                using var revisionsRequest = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"{baseUrl}/workItems/{workItemId}/revisions?$skip={skip}&$top={pageSize}&api-version=7.1");
+                ApplyPatHeader(revisionsRequest, patToken);
+
+                using var revisionsResponse = await httpClient.SendAsync(revisionsRequest, cancellationToken);
+                if (!revisionsResponse.IsSuccessStatusCode)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Revisions API failed for work item {workItemId}: {revisionsResponse.StatusCode}");
+                    if (allRevisions.Count == 0)
+                    {
+                        return new PhaseHistorySummary();
+                    }
+                    break; // We have some data, continue with what we have
+                }
+
+                var revisionsData = await revisionsResponse.Content.ReadFromJsonAsync<RevisionsResponse>(JsonOptions, cancellationToken);
+                if (revisionsData?.Value is null || revisionsData.Value.Count == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] No more revisions found for work item {workItemId} at skip={skip}");
+                    break; // No more revisions to fetch
+                }
+
+                allRevisions.AddRange(revisionsData.Value);
+                System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Fetched {revisionsData.Value.Count} revisions for work item {workItemId} (skip={skip})");
+
+                // If we got fewer items than requested, we've reached the end
+                if (revisionsData.Value.Count < pageSize)
+                {
+                    break;
+                }
+
+                skip += pageSize;
             }
 
-            var revisionsData = await revisionsResponse.Content.ReadFromJsonAsync<RevisionsResponse>(JsonOptions, cancellationToken);
-            if (revisionsData?.Value is null || revisionsData.Value.Count == 0)
+            if (allRevisions.Count == 0)
             {
                 System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] No revisions found for work item {workItemId}");
                 return new PhaseHistorySummary();
             }
 
+            System.Diagnostics.Debug.WriteLine($"[GetPhaseHistoryAsync] Total revisions fetched: {allRevisions.Count} for work item {workItemId}");
+
             // Convert revisions to parser format
-            var revisionEvents = revisionsData.Value
+            var revisionEvents = allRevisions
                 .Select(r => new OrchestratorPhaseHistoryParser.RevisionEventDto
                 {
                     ChangedDate = GetFieldDate(r.Fields, "System.ChangedDate"),

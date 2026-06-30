@@ -2,6 +2,7 @@
 
 @using SmartReviewSystem.Services.DevOps
 @using SmartReviewSystem.Models.DevOps
+@using DevExpress.Blazor
 
 <PageTitle>Orchestrator Dashboard</PageTitle>
 
@@ -58,7 +59,11 @@
             @if (ActiveTab == "running")
             {
                 <div class="dashboard-tab-pane">
-                    <div class="dashboard-toolbar dashboard-toolbar--compact">
+                    <div class="dashboard-toolbar">
+                        <label class="dashboard-toolbar__search dashboard-filter-group">
+                            <span class="dashboard-filter-label">Search</span>
+                            <input class="dashboard-filter-input" @bind="RunningSearchText" @bind:event="oninput" placeholder="Story ID, title, assignee, MFE, execution mode, phase" />
+                        </label>
                         <label class="dashboard-filter-group">
                             <span class="dashboard-filter-label">Filter</span>
                             <select class="dashboard-filter-select" @bind="OrchestratorFilter">
@@ -76,45 +81,68 @@
                     }
                     else
                     {
-                        <div class="dashboard-running-grid-wrap">
-                            <table class="dashboard-table dashboard-table--running">
-                                <thead>
-                                    <tr>
-                                        <th></th>
-                                        <th>Story ID</th>
-                                        <th>Title</th>
-                                        <th>MFE</th>
-                                        <th>Assigned To</th>
-                                        <th>Execution Mode</th>
-                                        <th>Orchestrator Phase</th>
-                                        <th>Progress</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var story in RunningStories)
-                                    {
-                                        var progress = GetProgressPercentage(story.OrchestratorPhase);
-                                        var phaseStageInfo = GetPhaseStageInfo(story.OrchestratorPhase);
-                                        var progressBarCssClass = GetProgressBarCssClass(story.OrchestratorPhase);
-                                        var isExpanded = IsStoryExpanded(story.Id) && story.PhaseHistoryLoaded && story.PhaseHistorySummary != null;
-
-                                        <tr>
-                                            <td class="expand-cell">
-                                                <button type="button"
-                                                        class="expand-button"
-                                                        @onclick="@(async () => await LoadPhaseHistoryAsync(story))"
-                                                        title="@(isExpanded ? "Collapse phase history" : "Expand phase history")"
-                                                        aria-expanded="@isExpanded.ToString().ToLowerInvariant()">
-                                                    <span class="expand-icon">@(isExpanded ? "-" : "+")</span>
-                                                </button>
-                                            </td>
-                                            <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps" class="story-id-badge">@story.Id</a></td>
-                                            <td>@story.Title</td>
-                                            <td>@DisplayOrDash(story.Mfe)</td>
-                                            <td>@DisplayOrDash(story.AssignedTo)</td>
-                                            <td>@DisplayOrDash(story.ExecutionMode)</td>
-                                            <td>@DisplayOrDash(story.OrchestratorPhase)</td>
-                                            <td>
+                        <div class="dashboard-table-wrap">
+                            <DxGrid Data="RunningStories"
+                                    ShowAllRows="true"
+                                    KeyFieldName="Id"
+                                    CssClass="dashboard-dxgrid dashboard-dxgrid--running"
+                                    AllowSort="true"
+                                    PagerVisible="false"
+                                    ShowSearchBox="false"
+                                    DetailRowDisplayMode="GridDetailRowDisplayMode.Auto"
+                                    DetailExpandButtonDisplayMode="GridDetailExpandButtonDisplayMode.Auto"
+                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
+                                <Columns>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="Story ID" Width="100">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                <div style="text-align: left;">
+                                                    <a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps" class="story-id-badge">@story.Id</a>
+                                                </div>
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Title)" Caption="Title" MinWidth="220" />
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Mfe)" Caption="MFE" MinWidth="110">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.Mfe)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.AssignedTo)" Caption="Assigned To" MinWidth="150">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.AssignedTo)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.ExecutionMode)" Caption="Execution Mode" MinWidth="130">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.ExecutionMode)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.OrchestratorPhase)" Caption="Orchestrator Phase" MinWidth="100">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.OrchestratorPhase)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.OrchestratorPhase)" Caption="Progress" MinWidth="200" AllowSort="false">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                var progress = GetProgressPercentage(story.OrchestratorPhase);
+                                                var phaseStageInfo = GetPhaseStageInfo(story.OrchestratorPhase);
+                                                var progressBarCssClass = GetProgressBarCssClass(story.OrchestratorPhase);
                                                 <div class="orchestrator-progress-container">
                                                     <div class="orchestrator-progress-bar-wrapper @progressBarCssClass">
                                                         <div class="orchestrator-progress-bar" style="width: @progress%">
@@ -130,105 +158,114 @@
                                                         }
                                                     </div>
                                                 </div>
-                                            </td>
-                                        </tr>
-
-                                        @if (isExpanded && story.PhaseHistorySummary != null)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                </Columns>
+                                <DetailRowTemplate Context="detailContext">
+                                    @{
+                                        var story = (DevOpsStoryItem)detailContext.DataItem;
+                                        _ = LoadPhaseHistoryAsync(story);
+                                        if (story.PhaseHistorySummary == null)
                                         {
-                                            <tr class="phase-history-row">
-                                                <td colspan="8">
-                                                    <div class="phase-history-container">
-                                                        <div class="phase-history-summary">
-                                                            <h4>Execution Summary</h4>
-                                                            <div class="summary-grid">
-                                                                <div class="summary-item">
-                                                                    <span class="summary-label">Started:</span>
-                                                                    <span class="summary-value">@ImplementationTimeHelper.FormatDateTimeOffset(story.PhaseHistorySummary.ExecutionStarted)</span>
-                                                                </div>
-                                                                <div class="summary-item">
-                                                                    <span class="summary-label">Last Activity:</span>
-                                                                    <span class="summary-value">@ImplementationTimeHelper.FormatDateTimeOffset(story.PhaseHistorySummary.ExecutionCompleted)</span>
-                                                                </div>
-                                                                <div class="summary-item">
-                                                                    <span class="summary-label">Total Duration:</span>
-                                                                    <span class="summary-value">@ImplementationTimeHelper.FormatDuration(story.PhaseHistorySummary.TotalDuration)</span>
-                                                                </div>
-                                                                <div class="summary-item">
-                                                                    <span class="summary-label">Current Status:</span>
-                                                                    <span class="summary-value">@(string.IsNullOrWhiteSpace(story.PhaseHistorySummary.FinalStatus) ? story.PhaseHistorySummary.CurrentRunningPhase : story.PhaseHistorySummary.FinalStatus)</span>
-                                                                </div>
-                                                                <div class="summary-item">
-                                                                    <span class="summary-label">Success Rate:</span>
-                                                                    <span class="summary-value">@GetSuccessRatePercentage(story.PhaseHistorySummary.SuccessRate)%</span>
-                                                                </div>
-                                                            </div>
-
-                                                            <div class="summary-metrics">
-                                                                <div class="metric">
-                                                                    <span class="metric-label">Total Phases:</span>
-                                                                    <span class="metric-value">@story.PhaseHistorySummary.TotalPhases</span>
-                                                                </div>
-                                                                <div class="metric">
-                                                                    <span class="metric-label">Completed:</span>
-                                                                    <span class="metric-value">@story.PhaseHistorySummary.CompletedPhases</span>
-                                                                </div>
-                                                                <div class="metric">
-                                                                    <span class="metric-label">Errored:</span>
-                                                                    <span class="metric-value">@story.PhaseHistorySummary.ErroredPhases</span>
-                                                                </div>
-                                                                <div class="metric">
-                                                                    <span class="metric-label">Recovered:</span>
-                                                                    <span class="metric-value">@story.PhaseHistorySummary.RecoveredErrors</span>
-                                                                </div>
-                                                            </div>
+                                            <div class="phase-history-container">
+                                                <div class="phase-history-loading">
+                                                    <p>Loading phase history...</p>
+                                                </div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="phase-history-container">
+                                                <div class="phase-history-summary">
+                                                    <h4>Execution Summary</h4>
+                                                    <div class="summary-grid">
+                                                        <div class="summary-item">
+                                                            <span class="summary-label">Started:</span>
+                                                            <span class="summary-value">@ImplementationTimeHelper.FormatDateTimeOffset(story.PhaseHistorySummary.ExecutionStarted)</span>
                                                         </div>
-
-                                                        @if (story.PhaseHistorySummary.PhaseHistory.Count > 0)
-                                                        {
-                                                            <div class="phase-history-table">
-                                                                <table class="phases-table">
-                                                                    <thead>
-                                                                        <tr>
-                                                                            <th>Phase Name</th>
-                                                                            <th>Start Time</th>
-                                                                            <th>Duration</th>
-                                                                            <th>Status</th>
-                                                                            <th>Error</th>
-                                                                        </tr>
-                                                                    </thead>
-                                                                    <tbody>
-                                                                        @foreach (var phase in story.PhaseHistorySummary.PhaseHistory)
-                                                                        {
-                                                                            <tr class="@GetPhaseStatusCssClass(phase.FinalStatus)">
-                                                                                <td>@phase.PhaseName</td>
-                                                                                <td>@ImplementationTimeHelper.FormatDateTimeOffset(phase.StartTime)</td>
-                                                                                <td>@ImplementationTimeHelper.FormatDuration(phase.Duration)</td>
-                                                                                <td>
-                                                                                    @FormatPhaseStatus(phase.FinalStatus)
-                                                                                </td>
-                                                                                <td>
-                                                                                    @if (phase.HasError)
-                                                                                    {
-                                                                                        <span class="error-marker" title="@StripHtmlTags(phase.ErrorMessage)">? Error at @ImplementationTimeHelper.FormatDateTimeOffset(phase.ErrorTime)</span>
-                                                                                    }
-                                                                                    else
-                                                                                    {
-                                                                                        <span>-</span>
-                                                                                    }
-                                                                                </td>
-                                                                            </tr>
-                                                                        }
-                                                                    </tbody>
-                                                                </table>
-                                                            </div>
-                                                        }
+                                                        <div class="summary-item">
+                                                            <span class="summary-label">Last Activity:</span>
+                                                            <span class="summary-value">@ImplementationTimeHelper.FormatDateTimeOffset(story.PhaseHistorySummary.ExecutionCompleted)</span>
+                                                        </div>
+                                                        <div class="summary-item">
+                                                            <span class="summary-label">Total Duration:</span>
+                                                            <span class="summary-value">@ImplementationTimeHelper.FormatDuration(story.PhaseHistorySummary.TotalDuration)</span>
+                                                        </div>
+                                                        <div class="summary-item">
+                                                            <span class="summary-label">Current Status:</span>
+                                                            <span class="summary-value">@(string.IsNullOrWhiteSpace(story.PhaseHistorySummary.FinalStatus) ? story.PhaseHistorySummary.CurrentRunningPhase : story.PhaseHistorySummary.FinalStatus)</span>
+                                                        </div>
+                                                        <div class="summary-item">
+                                                            <span class="summary-label">Success Rate:</span>
+                                                            <span class="summary-value">@GetSuccessRatePercentage(story.PhaseHistorySummary.SuccessRate)%</span>
+                                                        </div>
                                                     </div>
-                                                </td>
-                                            </tr>
+
+                                                    <div class="summary-metrics">
+                                                        <div class="metric">
+                                                            <span class="metric-label">Total Phases:</span>
+                                                            <span class="metric-value">@story.PhaseHistorySummary.TotalPhases</span>
+                                                        </div>
+                                                        <div class="metric">
+                                                            <span class="metric-label">Completed:</span>
+                                                            <span class="metric-value">@story.PhaseHistorySummary.CompletedPhases</span>
+                                                        </div>
+                                                        <div class="metric">
+                                                            <span class="metric-label">Errored:</span>
+                                                            <span class="metric-value">@story.PhaseHistorySummary.ErroredPhases</span>
+                                                        </div>
+                                                        <div class="metric">
+                                                            <span class="metric-label">Recovered:</span>
+                                                            <span class="metric-value">@story.PhaseHistorySummary.RecoveredErrors</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                @if (story.PhaseHistorySummary.PhaseHistory.Count > 0)
+                                                {
+                                                    <div class="phase-history-table">
+                                                        <table class="phases-table">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>Phase Name</th>
+                                                                    <th>Start Time</th>
+                                                                    <th>Duration</th>
+                                                                    <th>Status</th>
+                                                                    <th>Error</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @foreach (var phase in story.PhaseHistorySummary.PhaseHistory)
+                                                                {
+                                                                    <tr class="@GetPhaseStatusCssClass(phase.FinalStatus)">
+                                                                        <td>@phase.PhaseName</td>
+                                                                        <td>@ImplementationTimeHelper.FormatDateTimeOffset(phase.StartTime)</td>
+                                                                        <td>@ImplementationTimeHelper.FormatDuration(phase.Duration)</td>
+                                                                        <td>
+                                                                            @FormatPhaseStatus(phase.FinalStatus)
+                                                                        </td>
+                                                                        <td>
+                                                                            @if (phase.HasError)
+                                                                            {
+                                                                                <span class="error-marker" title="@StripHtmlTags(phase.ErrorMessage)">? Error at @ImplementationTimeHelper.FormatDateTimeOffset(phase.ErrorTime)</span>
+                                                                            }
+                                                                            else
+                                                                            {
+                                                                                <span>-</span>
+                                                                            }
+                                                                        </td>
+                                                                    </tr>
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                }
+                                            </div>
                                         }
                                     }
-                                </tbody>
-                            </table>
+                                </DetailRowTemplate>
+                            </DxGrid>
                         </div>
                     }
                 </div>
@@ -288,39 +325,85 @@
                     else
                     {
                         <div class="dashboard-table-wrap">
-                            <table class="dashboard-table">
-                                <thead>
-                                    <tr>
-                                        <th>Story ID</th>
-                                        <th>Title</th>
-                                        <th>Assigned To</th>
-                                        <th>State</th>
-                                        <th>MFE</th>
-                                        <th>Execution Mode</th>
-                                        <th>Orchestrator Phase</th>
-                                        <th>Implementation Time</th>
-                                        <th>Implementation Cost</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var story in FilteredStories)
-                                    {
-                                        var implTime = FormatImplementationTime(story.ImplementationDuration);
-                                        var implCost = FormatImplementationCost(story.ImplementationCost);
-                                        <tr>
-                                            <td><a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps" class="story-id-badge">@story.Id</a></td>
-                                            <td>@story.Title</td>
-                                            <td>@DisplayOrDash(story.AssignedTo)</td>
-                                            <td>@DisplayOrDash(story.State)</td>
-                                            <td>@DisplayOrDash(story.Mfe)</td>
-                                            <td>@DisplayOrDash(story.ExecutionMode)</td>
-                                            <td>@DisplayOrDash(story.OrchestratorPhase)</td>
-                                            <td title="@FormatImplementationTimeTooltip(story.StartDate, story.CompletionDate)">@implTime</td>
-                                            <td>@implCost</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </table>
+                            <DxGrid Data="FilteredStories"
+                                    ShowAllRows="true"
+                                    KeyFieldName="Id"
+                                    CssClass="dashboard-dxgrid"
+                                    AllowSort="true"
+                                    PagerVisible="false"
+                                    ShowSearchBox="false"
+                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
+                                <Columns>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="Story ID" Width="100">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                <div style="text-align: left;">
+                                                    <a href="@story.WorkItemUrl" target="_blank" rel="noopener noreferrer" title="Open in Azure DevOps" class="story-id-badge">@story.Id</a>
+                                                </div>
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Title)" Caption="Title" MinWidth="250" />
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.AssignedTo)" Caption="Assigned To" MinWidth="150">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.AssignedTo)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.State)" Caption="State" MinWidth="140">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.State)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Mfe)" Caption="MFE" MinWidth="120">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.Mfe)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.ExecutionMode)" Caption="Execution Mode" MinWidth="130">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.ExecutionMode)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.OrchestratorPhase)" Caption="Orchestrator Phase" MinWidth="150">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.OrchestratorPhase)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.ImplementationDuration)" Caption="Implementation Time" MinWidth="150">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                var implTime = FormatImplementationTime(story.ImplementationDuration);
+                                                <span title="@FormatImplementationTimeTooltip(story.StartDate, story.CompletionDate)">@implTime</span>
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.ImplementationCost)" Caption="Implementation Cost" MinWidth="150">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @FormatImplementationCost(story.ImplementationCost)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                </Columns>
+                            </DxGrid>
                         </div>
                     }
 

@@ -863,3 +863,40 @@
     color: #9d2f2f;
     cursor: help;
 }
+
+/* DevExpress Grid Styles */
+.dashboard-dxgrid {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+    /* Ensure left alignment for grid cells */
+    .dashboard-dxgrid td,
+    .dashboard-dxgrid .dxgv-cell {
+        text-align: left;
+        vertical-align: middle;
+    }
+
+/* Story ID Badge in Grid - Left Aligned */
+.dxgrid-wrapper .story-id-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Grid column header styling */
+.dashboard-dxgrid .dxgv-header {
+    text-align: left;
+}
+
+/* Ensure all grid cells have proper padding and alignment */
+.dashboard-dxgrid .dxgv-cell {
+    padding: 8px 12px;
+    text-align: left;
+}
+
+.dxgrid-wrapper {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+}

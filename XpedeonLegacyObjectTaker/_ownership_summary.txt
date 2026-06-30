@@ -1,0 +1,12 @@
+30-06-2026 16:26:48.21 | WorkOrderInstructionNature | DATABASE/TABLE | SC_WO_INS_NATURE_LIST | OK
+30-06-2026 16:26:48.22 | WorkOrderInstructionNature | DATABASE/PROC | SPN_SC_DEL_WI_NATURE_LIST | OK
+30-06-2026 16:26:48.24 | WorkOrderInstructionNature | DATABASE/PROC | SPN_SC_GET_WI_NATURE_LIST | OK
+30-06-2026 16:26:48.25 | WorkOrderInstructionNature | DATABASE/PROC | SPN_SC_INS_WI_NATURE_LIST | OK
+30-06-2026 16:26:48.26 | WorkOrderInstructionNature | DATABASE/PROC | SPN_SC_UPD_WI_NATURE_LIST | OK
+30-06-2026 16:26:48.28 | WorkOrderInstructionNature | DATABASE/PROC | SPN_SE_GET_IS_SUPPLY_PORTAL_APPLICABLE | OK
+30-06-2026 16:26:48.29 | WorkOrderInstructionNature | BLL/BLL | bSecurity.cs | OK
+30-06-2026 16:26:48.31 | WorkOrderInstructionNature | BLL/BLL | bWorkInsNatureList.cs | OK
+30-06-2026 16:26:48.33 | WorkOrderInstructionNature | DAL/DAL | sSecurity.cs | OK
+30-06-2026 16:26:48.35 | WorkOrderInstructionNature | DAL/DAL | sWorkInsNatureList.cs | OK
+30-06-2026 16:26:48.37 | WorkOrderInstructionNature | UI/UI_FORM | xpWOInsNatureList.cs | OK
+30-06-2026 16:26:48.39 | WorkOrderInstructionNature | UI/DESIGNER | xpWOInsNatureList.Designer.cs | OK

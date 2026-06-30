@@ -1,0 +1,29 @@
+AgreementTypes
+ApprovalRegion
+ApproverRoles
+CautionCategories
+ContractPayOthElements
+CostHeadAndCode
+Country Tax Setup
+CVRGroups
+Distribution List Setup
+Divisions
+DivisionsAndRegions
+External Entity Info Areas
+External Entity Roles
+HSNSACCodes
+JournalVoucherType
+PaymentTerms
+PrimeActivity
+Regions
+Remarks
+SubledgerType
+TANMaster
+Tax Rates
+TrainingInternalLevyRateMaintenance
+ValueLimit
+Vat Configuration
+VATGroups
+Work Order Instruction Client Change Type
+Work Order Instruction Nature
+WorkOrderInstructionNature
