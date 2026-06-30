@@ -456,9 +456,15 @@
 
         try
         {
-            var batchFilePath = @"D:\My Projects\Xpedeon-Smart-Review-Engine\XpedeonLegacyObjectTaker\list_folders.bat";
+            // Dynamically compute batch file path based on repository structure
+            var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            var projectRoot = Directory.GetParent(baseDirectory)?.Parent?.Parent?.FullName 
+                ?? throw new InvalidOperationException("Unable to determine project root");
+            var solutionDirectory = Directory.GetParent(projectRoot)?.FullName
+                ?? throw new InvalidOperationException("Unable to determine solution directory");
+            var batchFilePath = Path.Combine(solutionDirectory, "XpedeonLegacyObjectTaker", "list_folders.bat");
 
-            Logger.LogInformation("Calling RunSyncBatchAsync with path: {FilePath}", batchFilePath);
+            Logger.LogInformation("Calling RunSyncBatchAsync with computed path: {FilePath}", batchFilePath);
             await DashboardService.RunSyncBatchAsync(batchFilePath, CancellationToken.None);
 
             Logger.LogInformation("Batch file completed successfully, reloading data...");
