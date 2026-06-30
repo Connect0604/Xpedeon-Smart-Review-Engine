@@ -1,13 +1,20 @@
 using MigrationDashboard.Web.Models;
+using Microsoft.Extensions.Logging;
 
 namespace MigrationDashboard.Web.Services;
 
 public sealed class MigrationDashboardService(
     IMigrationDashboardRepository repository,
-    IEditorIdentityAccessor editorIdentityAccessor) : IMigrationDashboardService
+    IEditorIdentityAccessor editorIdentityAccessor,
+    ILogger<MigrationDashboardService>? logger = null) : IMigrationDashboardService
 {
     public MigrationDashboardService(IMigrationDashboardRepository repository)
-        : this(repository, new AnonymousEditorIdentityAccessor())
+        : this(repository, new AnonymousEditorIdentityAccessor(), null)
+    {
+    }
+
+    public MigrationDashboardService(IMigrationDashboardRepository repository, ILogger<MigrationDashboardService> logger)
+        : this(repository, new AnonymousEditorIdentityAccessor(), logger)
     {
     }
 
@@ -187,6 +194,124 @@ public sealed class MigrationDashboardService(
     public Task UpdateReviewStatusAsync(UpdateReviewStatusRequest request, CancellationToken cancellationToken)
     {
         return UpdateReviewStatusInternalAsync(request, cancellationToken);
+    }
+
+    public async Task RunSyncBatchAsync(string batchFilePath, CancellationToken cancellationToken)
+    {
+        logger?.LogInformation("Sync batch started. File path: {FilePath}", batchFilePath);
+
+        if (!File.Exists(batchFilePath))
+        {
+            logger?.LogError("Batch file not found: {FilePath}", batchFilePath);
+            throw new FileNotFoundException($"Batch file not found: {batchFilePath}");
+        }
+
+        var processInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c \"{batchFilePath}\" run auto",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(batchFilePath)
+        };
+
+        using var process = System.Diagnostics.Process.Start(processInfo);
+        if (process is null)
+        {
+            logger?.LogError("Failed to start batch file process");
+            throw new InvalidOperationException("Failed to start batch file process.");
+        }
+
+        logger?.LogInformation("Batch process started with PID: {ProcessId}", process.Id);
+
+        try
+        {
+            // Read output in background to prevent deadlocks
+            var outputTask = Task.Run(async () =>
+            {
+                try
+                {
+                    string? line;
+                    while ((line = await process.StandardOutput.ReadLineAsync()) != null)
+                    {
+                        // Output is read but not logged
+                    }
+                }
+                catch
+                {
+                    // Ignore errors reading output
+                }
+            });
+
+            var errorTask = Task.Run(async () =>
+            {
+                try
+                {
+                    string? line;
+                    while ((line = await process.StandardError.ReadLineAsync()) != null)
+                    {
+                        // Error output is read but not logged
+                    }
+                }
+                catch
+                {
+                    // Ignore errors reading error output
+                }
+            });
+
+            // Set a timeout of 5 minutes for the batch operation
+            var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
+
+            var exitedTask = process.WaitForExitAsync(timeoutCts.Token);
+
+            await Task.WhenAll(exitedTask, outputTask, errorTask).ConfigureAwait(false);
+
+            var exitCode = process.ExitCode;
+            logger?.LogInformation("Batch process completed with exit code: {ExitCode}", exitCode);
+
+            if (exitCode != 0)
+            {
+                logger?.LogError("Batch file failed with exit code: {ExitCode}", exitCode);
+                throw new InvalidOperationException($"Batch file failed with exit code {exitCode}");
+            }
+
+            logger?.LogInformation("Sync batch completed successfully");
+        }
+        catch (OperationCanceledException)
+        {
+            logger?.LogError("Batch process timed out after 5 minutes");
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                }
+            }
+            catch
+            {
+                // Ignore errors when killing the process
+            }
+            throw new TimeoutException("Batch file execution timed out after 5 minutes");
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Error running batch file");
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                }
+            }
+            catch
+            {
+                // Ignore errors when killing the process
+            }
+            throw;
+        }
     }
 
     private static string? NormalizeSearchTerm(string? searchTerm)

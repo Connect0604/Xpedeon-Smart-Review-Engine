@@ -4,10 +4,12 @@
 @using MigrationDashboard.Web.Models
 @using MigrationDashboard.Web.Services
 @using Microsoft.JSInterop
+@using Microsoft.Extensions.Logging
 @inject IMigrationDashboardService DashboardService
 @inject IEditorAuthenticationService EditorAuthenticationService
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
+@inject ILogger<MigrationDashboardPage> Logger
 @implements IAsyncDisposable
 
 <PageTitle>Migration Dashboard</PageTitle>
@@ -32,7 +34,7 @@
                         <option value="@SearchScopes.ProcessCode">Process Code</option>
                         <option value="@SearchScopes.StepCode">Step Code</option>
                     </select>
-                    <div class="header-search-input-shell">
+                    <div class="header-search-input-shell search-input-with-clear">
                         <label class="field-label sr-only" for="dashboard-search">Global search</label>
                         <input id="dashboard-search"
                                data-testid="form-search"
@@ -41,11 +43,34 @@
                                @oninput="HandleSearchInput"
                                placeholder="Search forms, objects, procedures"
                                autocomplete="off" />
+                        @if (!string.IsNullOrWhiteSpace(_searchTerm))
+                        {
+                            <button type="button"
+                                    class="search-clear-btn"
+                                    data-testid="clear-search"
+                                    @onclick="() => HandleSearchChanged(null)"
+                                    title="Clear search"
+                                    aria-label="Clear search">
+                                ×
+                            </button>
+                        }
                     </div>
                 </div>
             </div>
 
             <div class="header-audit-region">
+                @if (_isEditMode)
+                {
+                    <button type="button"
+                            class="btn btn-sm btn-outline-secondary header-sync-button"
+                            style="margin-right: 0.5rem;"
+                            data-testid="sync-button"
+                            disabled="@_isSyncing"
+                            @onclick="HandleSyncAsync"
+                            title="Reload data from source">
+                        @(_isSyncing ? "Syncing..." : "Sync Data")
+                    </button>
+                }
                 <button type="button"
                         class="btn btn-sm btn-outline-secondary header-audit-button"
                         data-testid="audit-button"
@@ -259,6 +284,7 @@
     private bool _isEventsExpanded = true;
     private string? _editorUserName;
     private bool _isBatchSaving;
+    private bool _isSyncing;
     private Dictionary<OwnershipObjectKey, OwnershipEditState> _originalOwnershipState = [];
     private Dictionary<int, EventEditState> _originalEventState = [];
     private IJSObjectReference? _shortcutModule;
@@ -412,6 +438,56 @@
         _auditSearchScope = SearchScopes.All;
         _auditSearchTerm = null;
         await LoadAuditRowsAsync();
+    }
+
+    private async Task HandleSyncAsync()
+    {
+        if (_isSyncing)
+        {
+            Logger.LogWarning("Sync already in progress, ignoring duplicate request");
+            return;
+        }
+
+        _isSyncing = true;
+        _loadError = null;
+        StateHasChanged();
+
+        Logger.LogInformation("Sync operation started by user: {UserName}", _editorUserName);
+
+        try
+        {
+            var batchFilePath = @"D:\My Projects\Xpedeon-Smart-Review-Engine\XpedeonLegacyObjectTaker\list_folders.bat";
+
+            Logger.LogInformation("Calling RunSyncBatchAsync with path: {FilePath}", batchFilePath);
+            await DashboardService.RunSyncBatchAsync(batchFilePath, CancellationToken.None);
+
+            Logger.LogInformation("Batch file completed successfully, reloading data...");
+            await LoadFormsAsync();
+            await LoadEventsAsync();
+            await LoadAuditRowsAsync();
+
+            Logger.LogInformation("Sync operation completed successfully");
+        }
+        catch (TimeoutException ex)
+        {
+            _loadError = "Sync operation timed out after 5 minutes.";
+            Logger.LogError(ex, "Sync operation timed out");
+        }
+        catch (FileNotFoundException ex)
+        {
+            _loadError = $"Batch file not found: {ex.Message}";
+            Logger.LogError(ex, "Batch file not found");
+        }
+        catch (Exception ex)
+        {
+            _loadError = $"Sync failed: {ex.Message}";
+            Logger.LogError(ex, "Sync operation failed");
+        }
+        finally
+        {
+            _isSyncing = false;
+            StateHasChanged();
+        }
     }
 
     private Task CloseAuditPopup()

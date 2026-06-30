@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(findstr /n \".\")",
+      "Bash(dir /b *.txt *.bat *.sql)",
+      "Bash(sqlcmd -S 192.168.169.181 -U XEWEB_USER -P 'Gp7#Zx!Qw@94Vm&K$T2LfY8C' -d BZMGTLDB -h -1 -W -Q 'SET NOCOUNT ON; SELECT FormId, FormName, Status FROM MIG.FORM ORDER BY FormId')",
+      "Bash(cmd /c list_folders.bat run auto)",
+      "PowerShell(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @\\('cmd.exe','sqlcmd.exe','conhost.exe'\\) } | Select-Object ProcessId, ParentProcessId, Name, CreationDate, CommandLine | Format-Table -AutoSize -Wrap)",
+      "Bash(export SQLCMDPASSWORD='Gp7#Zx!Qw@94Vm&K$T2LfY8C')",
+      "Bash(sqlcmd -S 192.168.169.181 -U XEWEB_USER -d BZMGTLDB -h -1 -W -Q \"SET NOCOUNT ON; SELECT COUNT\\(*\\) FROM MIG.OBJECT_OWNERSHIP\")",
+      "Bash(sqlcmd -S 192.168.169.181 -U XEWEB_USER -d BZMGTLDB -b -Q \"DELETE FROM MIG.FORM WHERE FormName='ApproverRoles'\")",
+      "Bash(xxd db_config.txt)"
+    ]
+  }
+}

@@ -10,4 +10,5 @@ public interface IMigrationDashboardService
     Task<IReadOnlyList<AuditLogRow>> GetAuditLogsAsync(string? formName, string? processCode, string? stepCode, string? searchTerm, CancellationToken cancellationToken);
     Task UpdateOwnershipAsync(UpdateOwnershipRowRequest request, CancellationToken cancellationToken);
     Task UpdateReviewStatusAsync(UpdateReviewStatusRequest request, CancellationToken cancellationToken);
+    Task RunSyncBatchAsync(string batchFilePath, CancellationToken cancellationToken);
 }

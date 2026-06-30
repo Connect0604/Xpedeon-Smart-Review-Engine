@@ -20,6 +20,7 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private string DevOpsProject = string.Empty;
     private string DevOpsPatToken = string.Empty;
     private string SearchText = string.Empty;
+    private string RunningSearchText = string.Empty;
     private string StateFilter = "Any";
     private string OrchestratorFilter = "Coding In Progress";
     private string ActiveTab = "running";
@@ -31,7 +32,6 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private PeriodicTimer? AutoReloadTimer;
     private bool AutoReloadEnabled;
     private int ReloadIntervalSeconds = 300;
-    private HashSet<int> ExpandedStoryIds = new();
 
     private bool AllImplementationDetailsLoaded =>
         Stories.Count == 0 || Stories.All(s => s.ImplementationDetailsLoaded);
@@ -40,7 +40,15 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
         DevOpsDashboardStoryFilter.Apply(Stories, SearchText, StateFilter).ToList();
 
     private List<DevOpsStoryItem> RunningStories =>
-        DevOpsDashboardStoryFilter.GetRunningStories(Stories, OrchestratorFilter).ToList();
+        DevOpsDashboardStoryFilter.GetRunningStories(Stories, OrchestratorFilter)
+            .Where(s => string.IsNullOrWhiteSpace(RunningSearchText) ||
+                   s.Id.ToString().Contains(RunningSearchText.ToLowerInvariant()) ||
+                   (s.Title?.Contains(RunningSearchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                   (s.AssignedTo?.Contains(RunningSearchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                   (s.Mfe?.Contains(RunningSearchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                   (s.ExecutionMode?.Contains(RunningSearchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                   (s.OrchestratorPhase?.Contains(RunningSearchText, StringComparison.OrdinalIgnoreCase) ?? false))
+            .ToList();
 
     private bool HasConnectionSettings =>
         !string.IsNullOrWhiteSpace(DevOpsOrganization) &&
@@ -206,8 +214,6 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     {
         if (story.PhaseHistoryLoaded)
         {
-            // Already loaded, just toggle expansion
-            ToggleExpansion(story.Id);
             return;
         }
 
@@ -220,7 +226,6 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
                 DevOpsPatToken.Trim(),
                 CancellationToken.None);
 
-            ToggleExpansion(story.Id);
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
@@ -228,20 +233,6 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
             System.Diagnostics.Debug.WriteLine($"Error loading phase history: {ex.Message}");
         }
     }
-
-    private void ToggleExpansion(int storyId)
-    {
-        if (ExpandedStoryIds.Contains(storyId))
-        {
-            ExpandedStoryIds.Remove(storyId);
-        }
-        else
-        {
-            ExpandedStoryIds.Add(storyId);
-        }
-    }
-
-    private bool IsStoryExpanded(int storyId) => ExpandedStoryIds.Contains(storyId);
 
     private string FormatReloadInterval(int seconds)
     {
@@ -278,17 +269,13 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
         if (string.IsNullOrWhiteSpace(input))
             return string.Empty;
 
-        // Remove HTML tags using regex
         var tagPattern = System.Text.RegularExpressions.Regex.Unescape("<.*?>");
         var result = System.Text.RegularExpressions.Regex.Replace(input, tagPattern, string.Empty);
 
-        // Decode HTML entities
         result = System.Net.WebUtility.HtmlDecode(result);
 
-        // Remove extra whitespace
         result = System.Text.RegularExpressions.Regex.Replace(result, @"\s+", " ").Trim();
 
-        // Limit length for tooltip
         return result.Length > 200 ? result.Substring(0, 200) + "..." : result;
     }
 
