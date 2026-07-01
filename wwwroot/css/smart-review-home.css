@@ -1734,6 +1734,55 @@
         color: #8b59ad;
     }
 
+    /* ===== DevExpress Dashboard Grid Header Styling ===== */
+    /* Header background - light purple */
+    .dashboard-dxgrid .dxgv-header,
+    .dashboard-dxgrid .dxgv-header-row,
+    .dashboard-dxgrid thead {
+        background: #f3ecfb !important;
+    }
+
+    /* Header cells - light purple with styling */
+    .dashboard-dxgrid .dxgv-header th,
+    .dashboard-dxgrid .dxgv-header-row th,
+    .dashboard-dxgrid thead th,
+    .dashboard-dxgrid th {
+        background: #f3ecfb !important;
+        border-bottom: 2px solid #ddc7f4 !important;
+        color: #4b5563 !important;
+        font-weight: 700 !important;
+        font-size: 0.75rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+        padding: 12px 16px !important;
+    }
+
+    /* Header content styling */
+    .dashboard-dxgrid .dxgv-header-content {
+        padding: 12px 16px !important;
+        font-size: 0.75rem !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+        color: #4b5563 !important;
+        background: #f3ecfb !important;
+    }
+
+    /* Running grid specific header */
+    .dashboard-dxgrid--running .dxgv-header,
+    .dashboard-dxgrid--running .dxgv-header-row,
+    .dashboard-dxgrid--running thead {
+        background: #f3ecfb !important;
+        border-bottom: 2px solid #ddc7f4 !important;
+    }
+
+    .dashboard-dxgrid--running .dxgv-header th,
+    .dashboard-dxgrid--running .dxgv-header-row th,
+    .dashboard-dxgrid--running thead th {
+        background: #f3ecfb !important;
+        border-bottom: 2px solid #ddc7f4 !important;
+    }
+
     .srs-search-hit {
         background: #c7f9cc;
         color: #123524;

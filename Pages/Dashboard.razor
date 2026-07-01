@@ -93,7 +93,7 @@
                                     DetailExpandButtonDisplayMode="GridDetailExpandButtonDisplayMode.Auto"
                                     FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
                                 <Columns>
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="Story ID" Width="100">
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="ID" Width="100">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
@@ -334,7 +334,7 @@
                                     ShowSearchBox="false"
                                     FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
                                 <Columns>
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="Story ID" Width="100">
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="ID" Width="100">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
@@ -345,7 +345,7 @@
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
                                     <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Title)" Caption="Title" MinWidth="250" />
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.AssignedTo)" Caption="Assigned To" MinWidth="150">
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.AssignedTo)" Caption="Assigned To" MinWidth="120">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
@@ -353,7 +353,7 @@
                                             }
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.State)" Caption="State" MinWidth="140">
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.State)" Caption="State" MinWidth="120">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
@@ -361,7 +361,7 @@
                                             }
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Mfe)" Caption="MFE" MinWidth="120">
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Mfe)" Caption="MFE" MinWidth="100">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
