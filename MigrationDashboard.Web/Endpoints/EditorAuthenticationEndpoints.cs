@@ -65,7 +65,7 @@ public static class EditorAuthenticationEndpoints
                 AllowRefresh = true
             });
 
-        var redirectUrl = SanitizeReturnUrl(request.ReturnUrl, "/dashboard?enterEditMode=true");
+        var redirectUrl = SanitizeReturnUrl(request.ReturnUrl, "/?enterEditMode=true");
         var editGrant = editSessionRegistry.CreateEditGrant(user.UserName);
         return Results.LocalRedirect(QueryHelpers.AddQueryString(redirectUrl, "editGrant", editGrant));
     }
@@ -88,13 +88,13 @@ public static class EditorAuthenticationEndpoints
         }
 
         await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        return Results.LocalRedirect(SanitizeReturnUrl(returnUrl, "/dashboard"));
+        return Results.LocalRedirect(SanitizeReturnUrl(returnUrl, "/"));
     }
 
     private static string BuildFailedLoginUrl(string errorMessage)
     {
         return QueryHelpers.AddQueryString(
-            "/dashboard",
+            "/",
             new Dictionary<string, string?>
             {
                 ["loginError"] = errorMessage
