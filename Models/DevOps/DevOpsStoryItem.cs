@@ -14,6 +14,7 @@ internal sealed class DevOpsStoryItem
     public DateTimeOffset? CompletionDate { get; set; }
     public string Mfe { get; init; } = string.Empty;
     public string ExecutionMode { get; init; } = string.Empty;
+    public string? BranchName { get; init; }
     public string WorkItemUrl { get; init; } = string.Empty;
     public List<DevOpsAttachmentItem> Attachments { get; init; } = new();
 

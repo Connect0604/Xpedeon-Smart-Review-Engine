@@ -28,7 +28,9 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private string ConnectionStatus = "Idle";
     private bool IsLoadingStories;
     private bool IsLoadingAllImplementationDetails;
+    private bool IsLoadingMfeModules;
     private List<DevOpsStoryItem> Stories = new();
+    private List<MfeModuleItem> MfeModules = new();
     private PeriodicTimer? AutoReloadTimer;
     private bool AutoReloadEnabled;
     private int ReloadIntervalSeconds = 300;
@@ -80,11 +82,13 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
             Stories = DashboardState.Stories.ToList();
             ConnectionStatus = DashboardState.ConnectionStatus;
             LoadError = DashboardState.LoadError;
+            await LoadMfeModulesAsync();
         }
         else
         {
             ConnectionStatus = "Connecting";
             await LoadStoriesAsync();
+            await LoadMfeModulesAsync();
         }
 
         if (AutoReloadEnabled)
@@ -208,6 +212,75 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private void SetActiveTab(string tabName)
     {
         ActiveTab = tabName;
+    }
+
+    private async Task HandleOrchestratorFilterChanged(ChangeEventArgs args)
+    {
+        OrchestratorFilter = args.Value?.ToString() ?? "Coding In Progress";
+        StateHasChanged();
+
+        if (OrchestratorFilter == "Coding In Progress" && MfeModules.Count == 0 && !IsLoadingMfeModules)
+        {
+            await LoadMfeModulesAsync();
+        }
+    }
+
+    private async Task LoadMfeModulesAsync()
+    {
+        if (IsLoadingMfeModules || !HasConnectionSettings)
+        {
+            return;
+        }
+
+        IsLoadingMfeModules = true;
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"LoadMfeModulesAsync: Starting to load MFE modules...");
+
+            // Fetch the full configured list of MFE modules from DevOps
+            var moduleNames = await AzureDevOpsService.GetMfeModulesAsync(
+                DevOpsOrganization.Trim(),
+                DevOpsProject.Trim(),
+                DevOpsPatToken.Trim(),
+                CancellationToken.None);
+
+            System.Diagnostics.Debug.WriteLine($"LoadMfeModulesAsync: Fetched {moduleNames.Count} modules from DevOps");
+
+            // Count stories in "Coding In Progress" state by module
+            var codingInProgressStories = DevOpsDashboardStoryFilter.GetRunningStories(Stories, "Coding In Progress").ToList();
+            System.Diagnostics.Debug.WriteLine($"LoadMfeModulesAsync: Found {codingInProgressStories.Count} stories in 'Coding In Progress'");
+
+            var storiesByModule = codingInProgressStories
+                .Where(s => !string.IsNullOrWhiteSpace(s.Mfe))
+                .GroupBy(s => s.Mfe)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            System.Diagnostics.Debug.WriteLine($"LoadMfeModulesAsync: Stories by module: {string.Join(", ", storiesByModule.Select(x => $"{x.Key}:{x.Value}"))}");
+
+            // Build the grid with ALL configured modules, including those with no stories
+            MfeModules = moduleNames
+                .Select(moduleName => new MfeModuleItem
+                {
+                    ModuleName = moduleName,
+                    StoriesCount = storiesByModule.TryGetValue(moduleName, out var count) ? count : 0
+                })
+                .OrderByDescending(m => m.StoriesCount)
+                .ThenBy(m => m.ModuleName)
+                .ToList();
+
+            System.Diagnostics.Debug.WriteLine($"LoadMfeModulesAsync: MfeModules populated with {MfeModules.Count} items");
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error loading MFE modules: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Error loading MFE modules stacktrace: {ex.StackTrace}");
+        }
+        finally
+        {
+            IsLoadingMfeModules = false;
+        }
     }
 
     private async Task LoadPhaseHistoryAsync(DevOpsStoryItem story)

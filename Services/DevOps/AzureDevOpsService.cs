@@ -11,6 +11,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
     private const string OrchestratorPhaseFieldName = "Custom.OrchestratorPhase";
     private const string MfeFieldName = "Custom.Module";
     private const string ExecutionModeFieldName = "Custom.ExecutionMode";
+    private const string ClaudeBranchFieldName = "Custom.ClaudeBranch";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -89,6 +90,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             var orchestratorPhase = item.Fields.TryGetValue(OrchestratorPhaseFieldName, out var phaseValue) ? phaseValue?.ToString() ?? string.Empty : string.Empty;
             var mfe = item.Fields.TryGetValue(MfeFieldName, out var mfeValue) ? mfeValue?.ToString() ?? string.Empty : string.Empty;
             var executionMode = item.Fields.TryGetValue(ExecutionModeFieldName, out var executionModeValue) ? executionModeValue?.ToString() ?? string.Empty : string.Empty;
+            var branchName = item.Fields.TryGetValue(ClaudeBranchFieldName, out var branchValue) ? branchValue?.ToString() : null;
 
             var attachments = (item.Relations ?? new List<RelationDto>())
                 .Where(r => string.Equals(r.Rel, "AttachedFile", StringComparison.OrdinalIgnoreCase))
@@ -126,6 +128,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 CompletionDate = revisionMetadata.CompletionDate,
                 Mfe = mfe,
                 ExecutionMode = executionMode,
+                BranchName = branchName,
                 WorkItemUrl = $"https://dev.azure.com/{Uri.EscapeDataString(organization)}/{Uri.EscapeDataString(project)}/_workitems/edit/{item.Id}",
                 Attachments = attachments
             });
@@ -455,11 +458,11 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             if (approvalComment?.CreatedDate is not null)
             {
                 approvalDate = approvalComment.CreatedDate;
-                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✓ FOUND orchestrator approval date for work item {workItemId}: {approvalDate}");
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ? FOUND orchestrator approval date for work item {workItemId}: {approvalDate}");
             }
             else
             {
-                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✗ No orchestrator approval comment found for work item {workItemId}");
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ? No orchestrator approval comment found for work item {workItemId}");
             }
 
             // Find the first comment from orchestrator that contains "Implementation complete"
@@ -476,11 +479,11 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             if (completionComment?.CreatedDate is not null)
             {
                 completionDate = completionComment.CreatedDate;
-                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✓ FOUND orchestrator completion date for work item {workItemId}: {completionDate}");
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ? FOUND orchestrator completion date for work item {workItemId}: {completionDate}");
             }
             else
             {
-                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✗ No orchestrator completion comment found for work item {workItemId}");
+                System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ? No orchestrator completion comment found for work item {workItemId}");
             }
 
             var implementationCost = ExtractImplementationCost(commentsList);
@@ -488,7 +491,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ✗ Exception for work item {workItemId}: {ex.Message}\n{ex.StackTrace}");
+            System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ? Exception for work item {workItemId}: {ex.Message}\n{ex.StackTrace}");
             return (null, null, null);
         }
     }
@@ -781,4 +784,103 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         public DateTimeOffset? OrchestratorPhaseUpdated { get; init; }
         public string? ImplementationCost { get; init; }
     }
+
+    public async Task<List<string>> GetMfeModulesAsync(string organization, string project, string patToken, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Step 1: Fetch the Module field definition to get its picklistId
+            using var fieldDefRequest = new HttpRequestMessage(HttpMethod.Get,
+                $"https://dev.azure.com/{organization}/_apis/wit/fields/Custom.Module?api-version=7.1");
+            ApplyPatHeader(fieldDefRequest, patToken);
+
+            using var fieldDefResponse = await httpClient.SendAsync(fieldDefRequest, cancellationToken);
+            if (!fieldDefResponse.IsSuccessStatusCode)
+            {
+                return new List<string>();
+            }
+
+            var fieldDefContent = await fieldDefResponse.Content.ReadAsStringAsync(cancellationToken);
+            var fieldDef = JsonSerializer.Deserialize<JsonElement>(fieldDefContent, JsonOptions);
+
+            // Extract the picklistId from the field definition
+            if (!fieldDef.TryGetProperty("picklistId", out var picklistIdElement))
+            {
+                return new List<string>();
+            }
+
+            var picklistId = picklistIdElement.GetString();
+            if (string.IsNullOrWhiteSpace(picklistId))
+            {
+                return new List<string>();
+            }
+
+            // Step 2: Fetch the picklist values using the picklistId
+            using var picklistRequest = new HttpRequestMessage(HttpMethod.Get,
+                $"https://dev.azure.com/{organization}/_apis/work/processes/lists/{picklistId}?api-version=7.1");
+            ApplyPatHeader(picklistRequest, patToken);
+
+            using var picklistResponse = await httpClient.SendAsync(picklistRequest, cancellationToken);
+            if (!picklistResponse.IsSuccessStatusCode)
+            {
+                return new List<string>();
+            }
+
+            var picklistContent = await picklistResponse.Content.ReadAsStringAsync(cancellationToken);
+            var picklistData = JsonSerializer.Deserialize<JsonElement>(picklistContent, JsonOptions);
+            var result = new List<string>();
+
+            // Extract from "items" or "value" property
+            var itemsPropertyNames = new[] { "items", "value" };
+
+            foreach (var propName in itemsPropertyNames)
+            {
+                if (picklistData.TryGetProperty(propName, out var itemsElement) &&
+                    itemsElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var item in itemsElement.EnumerateArray())
+                    {
+                        if (item.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            var value = item.GetString();
+                            if (!string.IsNullOrWhiteSpace(value))
+                            {
+                                result.Add(value);
+                            }
+                        }
+                        else if (item.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            if (item.TryGetProperty("name", out var nameElement))
+                            {
+                                var name = nameElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(name))
+                                {
+                                    result.Add(name);
+                                }
+                            }
+                            else if (item.TryGetProperty("value", out var valueElement))
+                            {
+                                var value = valueElement.GetString();
+                                if (!string.IsNullOrWhiteSpace(value))
+                                {
+                                    result.Add(value);
+                                }
+                            }
+                        }
+                    }
+
+                    if (result.Count > 0)
+                        break;
+                }
+            }
+
+            return result.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(v => v).ToList();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"GetMfeModulesAsync: Exception - {ex.Message}");
+            return new List<string>();
+        }
+    }
+
 }
