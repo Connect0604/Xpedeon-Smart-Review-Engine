@@ -66,9 +66,9 @@
                         </label>
                         <label class="dashboard-filter-group">
                             <span class="dashboard-filter-label">Filter</span>
-                            <select class="dashboard-filter-select" @bind="OrchestratorFilter">
-                                <option value="Coding In Progress">Coding In Progress</option>
-                                <option value="All">All</option>
+                            <select class="dashboard-filter-select" @onchange="HandleOrchestratorFilterChanged">
+                                <option value="Coding In Progress" selected="@(OrchestratorFilter == "Coding In Progress")">Coding In Progress</option>
+                                <option value="All" selected="@(OrchestratorFilter == "All")">All</option>
                             </select>
                         </label>
                     </div>
@@ -91,7 +91,7 @@
                                     ShowSearchBox="false"
                                     DetailRowDisplayMode="GridDetailRowDisplayMode.Auto"
                                     DetailExpandButtonDisplayMode="GridDetailExpandButtonDisplayMode.Auto"
-                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
+                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Never">
                                 <Columns>
                                     <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="ID" Width="100">
                                         <CellDisplayTemplate Context="cellContext">
@@ -133,6 +133,14 @@
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
                                                 @DisplayOrDash(story.OrchestratorPhase)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.BranchName)" Caption="Branch Name" MinWidth="180">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.BranchName)
                                             }
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
@@ -268,6 +276,49 @@
                             </DxGrid>
                         </div>
                     }
+
+                    @if (OrchestratorFilter == "Coding In Progress" && IsLoadingMfeModules)
+                    {
+                        <div class="dashboard-mfe-modules-section">
+                            <div class="mfe-modules-loading">
+                                <p>Loading MFE modules...</p>
+                            </div>
+                        </div>
+                    }
+                    else if (OrchestratorFilter == "Coding In Progress" && MfeModules.Count > 0)
+                    {
+                        <div class="dashboard-mfe-modules-section">
+                            <div class="mfe-modules-grid-wrap">
+                                <DxGrid Data="MfeModules"
+                                        ShowAllRows="true"
+                                        KeyFieldName="ModuleName"
+                                        CssClass="dashboard-dxgrid dashboard-dxgrid--mfe-modules"
+                                        AllowSort="true"
+                                        PagerVisible="false"
+                                        ShowSearchBox="false">
+                                    <Columns>
+                                        <DxGridDataColumn FieldName="@nameof(MfeModuleItem.ModuleName)" Caption="Module Name" MinWidth="300" />
+                                        <DxGridDataColumn FieldName="@nameof(MfeModuleItem.StoriesCount)" Caption="Stories In Progress" MinWidth="150" AllowSort="true">
+                                            <CellDisplayTemplate Context="cellContext">
+                                                @{
+                                                    var module = (MfeModuleItem)cellContext.DataItem;
+                                                    <span class="mfe-stories-badge">@module.StoriesCount</span>
+                                                }
+                                            </CellDisplayTemplate>
+                                        </DxGridDataColumn>
+                                    </Columns>
+                                </DxGrid>
+                            </div>
+                        </div>
+                    }
+                    else if (OrchestratorFilter == "Coding In Progress" && !IsLoadingMfeModules && MfeModules.Count == 0)
+                    {
+                        <div class="dashboard-mfe-modules-section">
+                            <div class="mfe-modules-empty">
+                                <p>No MFE modules configured or failed to load.</p>
+                            </div>
+                        </div>
+                    }
                 </div>
             }
             else if (ActiveTab == "tracker")
@@ -332,7 +383,7 @@
                                     AllowSort="true"
                                     PagerVisible="false"
                                     ShowSearchBox="false"
-                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
+                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Never">
                                 <Columns>
                                     <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="ID" Width="100">
                                         <CellDisplayTemplate Context="cellContext">

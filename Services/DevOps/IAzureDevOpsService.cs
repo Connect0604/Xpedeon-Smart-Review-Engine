@@ -8,4 +8,5 @@ internal interface IAzureDevOpsService
     Task<string> DownloadAttachmentTextAsync(string attachmentUrl, string patToken, CancellationToken cancellationToken);
     Task LoadImplementationDetailsAsync(DevOpsStoryItem story, string organization, string project, string patToken, CancellationToken cancellationToken);
     Task LoadPhaseHistoryAsync(DevOpsStoryItem story, string organization, string project, string patToken, CancellationToken cancellationToken);
+    Task<List<string>> GetMfeModulesAsync(string organization, string project, string patToken, CancellationToken cancellationToken);
 }
