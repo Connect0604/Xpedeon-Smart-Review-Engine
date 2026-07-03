@@ -1,0 +1,438 @@
+@page "/migration-progress-tracker"
+
+@using SmartReviewSystem.Models
+@using SmartReviewSystem.Services.MigrationProgressTracker
+
+@inject IMigrationProgressTrackerService TrackerService
+@inject ILogger<MigrationProgressTracker> Logger
+
+<PageTitle>Migration Progress Tracker</PageTitle>
+
+<section class="migration-tracker-page">
+    <header class="migration-tracker-hero">
+        <h1 class="migration-tracker-hero__title">Migration Progress Tracker</h1>
+
+        <label class="migration-tracker-searchbar migration-tracker-hero__search">
+            <span class="migration-tracker-searchbar__icon" aria-hidden="true"></span>
+            <input class="migration-tracker-searchbar__input"
+                   aria-label="Search migration items"
+                   @bind="SearchText"
+                   @bind:event="oninput"
+                   placeholder="Form name, process code, step code, page name" />
+        </label>
+
+        <div class="migration-tracker-hero__actions">
+            <button class="migration-tracker-refresh" type="button" @onclick="LoadAsync" disabled="@IsLoading">
+                @(IsLoading ? "Refreshing..." : "Refresh")
+            </button>
+        </div>
+    </header>
+
+    @if (IsLoading)
+    {
+        <div class="migration-tracker-state migration-tracker-state--loading">
+            <p>Loading migration progress...</p>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(ErrorMessage))
+    {
+        <div class="migration-tracker-state migration-tracker-state--error">
+            <p>@ErrorMessage</p>
+        </div>
+    }
+    else if (Dashboard is null)
+    {
+        <div class="migration-tracker-state">
+            <p>No migration data is available yet.</p>
+        </div>
+    }
+    else
+    {
+        <div class="migration-tracker-content">
+            <nav class="migration-tracker-tabs" aria-label="Migration tracker views">
+                <button type="button" class="migration-tracker-tab @(ActiveTab == ViewTab.Overview ? "is-active" : string.Empty)" @onclick="() => SetTab(ViewTab.Overview)">Overview</button>
+                <button type="button" class="migration-tracker-tab @(ActiveTab == ViewTab.ByStepType ? "is-active" : string.Empty)" @onclick="() => SetTab(ViewTab.ByStepType)">By Step Type</button>
+                <button type="button" class="migration-tracker-tab @(ActiveTab == ViewTab.ByProcessCode ? "is-active" : string.Empty)" @onclick="() => SetTab(ViewTab.ByProcessCode)">By Process Code</button>
+            </nav>
+
+            @if (ActiveTab == ViewTab.ByStepType)
+            {
+                <section class="migration-tracker-switcher" aria-label="Step type selector">
+                    @foreach (var stepType in StepTypeOrder)
+                    {
+                        <button type="button"
+                                class="migration-tracker-step-toggle @(SelectedStepType == stepType ? "is-active" : string.Empty)"
+                                @onclick="() => SelectStepType(stepType)">
+                            @StepTypeLabel(stepType)
+                        </button>
+                    }
+                </section>
+            }
+
+            <div class="migration-tracker-scroll">
+                @if (ActiveTab == ViewTab.Overview)
+                {
+                    <section class="migration-tracker-overall">
+                        <div class="migration-tracker-overall__header">
+                            <div>
+                                <p class="migration-tracker-section-label">Overall migration</p>
+                                <h2>@Dashboard.TotalCompleted of @Dashboard.TotalLegacy completed</h2>
+                            </div>
+                            <div class="migration-tracker-overall__metric">@Dashboard.OverallCompletionPercentage.ToString("0.0")%</div>
+                        </div>
+                        <div class="migration-tracker-progress">
+                            <div class="migration-tracker-progress__fill" style="width:@Dashboard.OverallCompletionPercentage%"></div>
+                        </div>
+                        <div class="migration-tracker-summary-grid">
+                            <div class="migration-tracker-summary-card">
+                                <span>Total Legacy</span>
+                                <strong>@Dashboard.TotalLegacy</strong>
+                            </div>
+                            <div class="migration-tracker-summary-card">
+                                <span>Completed</span>
+                                <strong>@Dashboard.TotalCompleted</strong>
+                            </div>
+                            <div class="migration-tracker-summary-card">
+                                <span>Pending</span>
+                                <strong>@Dashboard.TotalPending</strong>
+                            </div>
+                            <div class="migration-tracker-summary-card">
+                                <span>Completion</span>
+                                <strong>@Dashboard.OverallCompletionPercentage.ToString("0.0")%</strong>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="migration-tracker-card-grid">
+                        @foreach (var summary in Dashboard.StepTypeSummaries)
+                        {
+                            <button type="button" class="migration-tracker-card" @onclick="() => FocusStepType(summary.StepType)">
+                                <div class="migration-tracker-card__header">
+                                    <h3>@StepTypeLabel(summary.StepType)</h3>
+                                    <span class="migration-tracker-chip">@summary.StepType</span>
+                                </div>
+                                <div class="migration-tracker-card__metrics">
+                                    <div><span>Total</span><strong>@summary.Total</strong></div>
+                                    <div><span>Completed</span><strong>@summary.Completed</strong></div>
+                                    <div><span>Pending</span><strong>@summary.Pending</strong></div>
+                                    <div><span>Progress</span><strong>@summary.CompletionPercentage.ToString("0.0")%</strong></div>
+                                </div>
+                                <div class="migration-tracker-progress migration-tracker-progress--card">
+                                    <div class="migration-tracker-progress__fill" style="width:@summary.CompletionPercentage%"></div>
+                                </div>
+                            </button>
+                        }
+                    </section>
+                }
+                else if (ActiveTab == ViewTab.ByStepType)
+                {
+                    @foreach (var summary in StepTypeSummariesForSelected)
+                    {
+                        <section class="migration-tracker-group">
+                            <header class="migration-tracker-group__header">
+                                <div>
+                                    <p class="migration-tracker-section-label">@StepTypeLabel(summary.StepType)</p>
+                                    <h2>@summary.Total total</h2>
+                                </div>
+                                <div class="migration-tracker-group__metric">@summary.CompletionPercentage.ToString("0.0")%</div>
+                            </header>
+                            <div class="migration-tracker-progress">
+                                <div class="migration-tracker-progress__fill" style="width:@summary.CompletionPercentage%"></div>
+                            </div>
+
+                            @foreach (var process in summary.ProcessGroups)
+                            {
+                                var expanded = ExpandedStepTypeProcesses.Contains(GetStepTypeKey(summary.StepType, process.Key));
+                                var visibleItems = GetFilteredItems(process.Items);
+                                if (visibleItems.Count == 0)
+                                {
+                                    continue;
+                                }
+
+                                <article class="migration-tracker-accordion">
+                                    <button type="button" class="migration-tracker-accordion__toggle" @onclick="() => ToggleStepTypeProcess(summary.StepType, process.Key)">
+                                        <div class="migration-tracker-accordion__title">
+                                            <h3>@process.Label</h3>
+                                            <span>@process.Total total</span>
+                                        </div>
+                                        <div class="migration-tracker-accordion__meta">
+                                            <strong>@process.CompletionPercentage.ToString("0.0")%</strong>
+                                            <span>@process.Completed completed</span>
+                                            <span>@process.Pending pending</span>
+                                        </div>
+                                    </button>
+                                    <div class="migration-tracker-progress migration-tracker-progress--compact">
+                                        <div class="migration-tracker-progress__fill" style="width:@process.CompletionPercentage%"></div>
+                                    </div>
+                                    @if (expanded)
+                                    {
+                                        <div class="migration-tracker-table">
+                                            <div class="migration-tracker-table__head">
+                                                <span>Step Code</span>
+                                                <span>Step Name</span>
+                                                <span>Page Name</span>
+                                                <span>Status</span>
+                                                <span>Story</span>
+                                            </div>
+                                            @foreach (var item in visibleItems.OrderBy(i => i.StepCode))
+                                            {
+                                                <div class="migration-tracker-table__row">
+                                                    <span class="migration-tracker-table__cell migration-tracker-table__cell--code" data-label="Step Code">@item.StepCode</span>
+                                                    <span class="migration-tracker-table__cell" data-label="Step Name">@item.StepName</span>
+                                                    <span class="migration-tracker-table__cell" data-label="Page Name">@item.PageName</span>
+                                                    <span class="migration-tracker-table__cell" data-label="Status">
+                                                        <span class="migration-tracker-status migration-tracker-status--@item.Status.ToLowerInvariant()">@item.Status</span>
+                                                    </span>
+                                                    <span class="migration-tracker-table__cell" data-label="Story">
+                                                        @if (!string.IsNullOrWhiteSpace(item.MatchedStoryTitle))
+                                                        {
+                                                            <a href="@item.MatchedStoryUrl" target="_blank" rel="noopener noreferrer">@item.MatchedStoryTitle</a>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>-</span>
+                                                        }
+                                                    </span>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </article>
+                            }
+                        </section>
+                    }
+                }
+                else
+                {
+                    <section class="migration-tracker-process-grid">
+                        @foreach (var process in ProcessSummariesOrdered)
+                        {
+                            var expanded = ExpandedProcesses.Contains(process.ProcessCode);
+                            var processVisible = GetFilteredItems(process.StepTypeSummaries.SelectMany(s => s.ProcessGroups).SelectMany(g => g.Items).ToList());
+                            if (processVisible.Count == 0)
+                            {
+                                continue;
+                            }
+
+                            <article class="migration-tracker-process-card">
+                                <button type="button" class="migration-tracker-process-card__toggle" @onclick="() => ToggleProcess(process.ProcessCode)">
+                                    <div>
+                                        <p class="migration-tracker-section-label">Process code</p>
+                                        <h2>@process.ProcessCode</h2>
+                                    </div>
+                                    <div class="migration-tracker-process-card__metric">
+                                        <strong>@process.CompletionPercentage.ToString("0.0")%</strong>
+                                        <span>@process.Completed completed / @process.Total total</span>
+                                    </div>
+                                </button>
+
+                                <div class="migration-tracker-process-card__summary">
+                                    @foreach (var stepSummary in process.StepTypeSummaries)
+                                    {
+                                        <div class="migration-tracker-process-card__summary-item">
+                                            <span>@StepTypeLabel(stepSummary.StepType)</span>
+                                            <strong>@stepSummary.CompletionPercentage.ToString("0.0")%</strong>
+                                            <small>@stepSummary.Completed/@stepSummary.Total</small>
+                                        </div>
+                                    }
+                                </div>
+
+                                <div class="migration-tracker-progress migration-tracker-progress--compact">
+                                    <div class="migration-tracker-progress__fill" style="width:@process.CompletionPercentage%"></div>
+                                </div>
+
+                                @if (expanded)
+                                {
+                                    @foreach (var stepSummary in process.StepTypeSummaries)
+                                    {
+                                        var filteredStepItems = GetFilteredItems(stepSummary.ProcessGroups.SelectMany(g => g.Items).ToList());
+                                        if (filteredStepItems.Count == 0)
+                                        {
+                                            continue;
+                                        }
+
+                                        <div class="migration-tracker-process-card__detail">
+                                            <header class="migration-tracker-process-card__detail-header">
+                                                <div>
+                                                    <h3>@StepTypeLabel(stepSummary.StepType)</h3>
+                                                </div>
+                                                <strong>@stepSummary.CompletionPercentage.ToString("0.0")%</strong>
+                                            </header>
+                                            <div class="migration-tracker-progress migration-tracker-progress--compact">
+                                                <div class="migration-tracker-progress__fill" style="width:@stepSummary.CompletionPercentage%"></div>
+                                            </div>
+                                            <div class="migration-tracker-table">
+                                                <div class="migration-tracker-table__head">
+                                                    <span>Step Code</span>
+                                                    <span>Step Name</span>
+                                                    <span>Page Name</span>
+                                                    <span>Status</span>
+                                                    <span>Story</span>
+                                                </div>
+                                                @foreach (var item in filteredStepItems.OrderBy(i => i.StepCode))
+                                                {
+                                                    <div class="migration-tracker-table__row">
+                                                        <span class="migration-tracker-table__cell migration-tracker-table__cell--code" data-label="Step Code">@item.StepCode</span>
+                                                        <span class="migration-tracker-table__cell" data-label="Step Name">@item.StepName</span>
+                                                        <span class="migration-tracker-table__cell" data-label="Page Name">@item.PageName</span>
+                                                        <span class="migration-tracker-table__cell" data-label="Status">
+                                                            <span class="migration-tracker-status migration-tracker-status--@item.Status.ToLowerInvariant()">@item.Status</span>
+                                                        </span>
+                                                        <span class="migration-tracker-table__cell" data-label="Story">
+                                                            @if (!string.IsNullOrWhiteSpace(item.MatchedStoryTitle))
+                                                            {
+                                                                <a href="@item.MatchedStoryUrl" target="_blank" rel="noopener noreferrer">@item.MatchedStoryTitle</a>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span>-</span>
+                                                            }
+                                                        </span>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </article>
+                        }
+                    </section>
+                }
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    private enum ViewTab
+    {
+        Overview,
+        ByStepType,
+        ByProcessCode
+    }
+
+    private static readonly string[] StepTypeOrder = ["D", "R", "M"];
+
+    private MigrationProgressTrackerViewModel? Dashboard;
+    private ViewTab ActiveTab = ViewTab.Overview;
+    private string SelectedStepType = "D";
+    private string SearchText = string.Empty;
+    private readonly HashSet<string> ExpandedProcesses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> ExpandedStepTypeProcesses = new(StringComparer.OrdinalIgnoreCase);
+    private bool IsLoading = true;
+    private string ErrorMessage = string.Empty;
+
+    private string StatusLabel => string.IsNullOrWhiteSpace(ErrorMessage)
+        ? (Dashboard is null ? "Idle" : "Loaded")
+        : "Failed";
+
+    private IEnumerable<MigrationProgressProcessSummary> ProcessSummariesOrdered =>
+        Dashboard?.ProcessSummaries ?? [];
+
+    private int FilteredItemCount =>
+        Dashboard is null ? 0 : GetAllItems().Count;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        ErrorMessage = string.Empty;
+
+        try
+        {
+            Dashboard = await TrackerService.GetDashboardAsync(CancellationToken.None);
+            SelectedStepType = Dashboard.StepTypeSummaries.FirstOrDefault()?.StepType ?? "D";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load migration progress tracker.");
+            ErrorMessage = $"Failed to load migration progress tracker: {ex.Message}";
+            Dashboard = null;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void SetTab(ViewTab tab)
+    {
+        ActiveTab = tab;
+    }
+
+    private void FocusStepType(string stepType)
+    {
+        SelectedStepType = stepType;
+        ActiveTab = ViewTab.ByStepType;
+    }
+
+    private void SelectStepType(string stepType) => SelectedStepType = stepType;
+
+    private void ToggleProcess(string processCode)
+    {
+        if (!ExpandedProcesses.Add(processCode))
+        {
+            ExpandedProcesses.Remove(processCode);
+        }
+    }
+
+    private void ToggleStepTypeProcess(string stepType, string processCode)
+    {
+        var key = GetStepTypeKey(stepType, processCode);
+        if (!ExpandedStepTypeProcesses.Add(key))
+        {
+            ExpandedStepTypeProcesses.Remove(key);
+        }
+    }
+
+    private string StepTypeLabel(string stepType) => stepType.ToUpperInvariant() switch
+    {
+        "D" => "Documents",
+        "R" => "Reports",
+        "M" => "Masters",
+        _ => stepType
+    };
+
+    private static string GetStepTypeKey(string stepType, string processCode) => $"{stepType}::{processCode}";
+
+    private IEnumerable<MigrationProgressStepTypeSummary> StepTypeSummariesForSelected =>
+        Dashboard?.StepTypeSummaries
+            .Where(s => string.Equals(s.StepType, SelectedStepType, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(s => s.StepType)
+            ?? Enumerable.Empty<MigrationProgressStepTypeSummary>();
+
+    private List<MigrationProgressItem> GetAllItems() =>
+        Dashboard?.ProcessSummaries
+            .SelectMany(p => p.StepTypeSummaries)
+            .SelectMany(s => s.ProcessGroups)
+            .SelectMany(g => g.Items)
+            .Where(MatchesSearch)
+            .ToList()
+        ?? [];
+
+    private List<MigrationProgressItem> GetFilteredItems(IEnumerable<MigrationProgressItem> items) =>
+        items.Where(MatchesSearch).ToList();
+
+    private bool MatchesSearch(MigrationProgressItem item)
+    {
+        if (string.IsNullOrWhiteSpace(SearchText))
+        {
+            return true;
+        }
+
+        var term = SearchText.Trim();
+        return Contains(item.ProcessCode, term)
+            || Contains(item.StepCode, term)
+            || Contains(item.StepName, term)
+            || Contains(item.PageName, term)
+            || Contains(item.MatchedStoryTitle, term)
+            || Contains(item.MatchedStoryUrl, term);
+    }
+
+    private static bool Contains(string? value, string term) =>
+        !string.IsNullOrWhiteSpace(value) && value.Contains(term, StringComparison.OrdinalIgnoreCase);
+}

@@ -302,7 +302,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
 
         // Fetch comments to find orchestrator plan approval and completion dates
         System.Diagnostics.Debug.WriteLine($"[GetRevisionMetadataAsync] Fetching comments for work item {workItemId}");
-        var (orchestratorApprovalDate, orchestratorCompletionDate, implementationCost) = await GetOrchestratorDatesAsync(baseUrl, workItemId, patToken, cancellationToken);
+        var (orchestratorApprovalDate, orchestratorCompletionDate, implementationCost, implementationStartedAt, implementationEndedAt) = await GetOrchestratorDatesAsync(baseUrl, workItemId, patToken, cancellationToken);
 
         string? previousState = null;
         string? previousPhase = null;
@@ -369,11 +369,13 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             StartDate = startDate,
             CompletionDate = completionDate,
             OrchestratorPhaseUpdated = phaseUpdated,
-            ImplementationCost = implementationCost
+            ImplementationCost = implementationCost,
+            ImplementationStartedAt = implementationStartedAt,
+            ImplementationEndedAt = implementationEndedAt
         };
     }
 
-    private async Task<(DateTimeOffset? ApprovalDate, DateTimeOffset? CompletionDate, string? ImplementationCost)> GetOrchestratorDatesAsync(
+    private async Task<(DateTimeOffset? ApprovalDate, DateTimeOffset? CompletionDate, string? ImplementationCost, DateTimeOffset? ImplementationStartedAt, DateTimeOffset? ImplementationEndedAt)> GetOrchestratorDatesAsync(
         string baseUrl,
         int workItemId,
         string patToken,
@@ -397,7 +399,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             if (!commentsResponse.IsSuccessStatusCode)
             {
                 System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Comments API failed for work item {workItemId}: {commentsResponse.StatusCode}");
-                return (null, null, null);
+                return (null, null, null, null, null);
             }
 
             var responseContent = await commentsResponse.Content.ReadAsStringAsync(cancellationToken);
@@ -411,7 +413,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             if (string.IsNullOrEmpty(responseContent))
             {
                 System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] Comments API returned empty response for work item {workItemId}");
-                return (null, null, null);
+                return (null, null, null, null, null);
             }
 
             CommentsResponse? commentsData = null;
@@ -423,7 +425,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             catch (Exception jsonEx)
             {
                 System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] JSON Deserialization Error: {jsonEx.Message}");
-                return (null, null, null);
+                return (null, null, null, null, null);
             }
 
             // Handle both "value" and "comments" property names
@@ -433,7 +435,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             if (commentsList is null || commentsList.Count == 0)
             {
                 System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] No comments found for work item {workItemId}");
-                return (null, null, null);
+                return (null, null, null, null, null);
             }
 
             // Log all comments for debugging
@@ -465,6 +467,17 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ? No orchestrator approval comment found for work item {workItemId}");
             }
 
+            var implementationStartedComment = commentsList.FirstOrDefault(c =>
+            {
+                var content = c.Content ?? c.Text;
+                return !string.IsNullOrEmpty(content) &&
+                    content.Contains("pre-flight checks", StringComparison.OrdinalIgnoreCase) &&
+                    content.Contains("orchestrator", StringComparison.OrdinalIgnoreCase) &&
+                    c.CreatedDate.HasValue;
+            });
+
+            var implementationStartedAt = implementationStartedComment?.CreatedDate;
+
             // Find the first comment from orchestrator that contains "Implementation complete"
             var completionComment = commentsList.FirstOrDefault(c =>
             {
@@ -487,12 +500,12 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             }
 
             var implementationCost = ExtractImplementationCost(commentsList);
-            return (approvalDate, completionDate, implementationCost);
+            return (approvalDate, completionDate, implementationCost, implementationStartedAt, completionDate);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[GetOrchestratorDatesAsync] ? Exception for work item {workItemId}: {ex.Message}\n{ex.StackTrace}");
-            return (null, null, null);
+            return (null, null, null, null, null);
         }
     }
 
@@ -638,6 +651,8 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         story.CompletionDate = revisionMetadata.CompletionDate;
         story.OrchestratorPhaseUpdated = revisionMetadata.OrchestratorPhaseUpdated;
         story.ImplementationCost = revisionMetadata.ImplementationCost;
+        story.ImplementationStartedAt = revisionMetadata.ImplementationStartedAt;
+        story.ImplementationEndedAt = revisionMetadata.ImplementationEndedAt;
         story.ImplementationDetailsLoaded = true;
     }
 
@@ -783,6 +798,8 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         public DateTimeOffset? CompletionDate { get; init; }
         public DateTimeOffset? OrchestratorPhaseUpdated { get; init; }
         public string? ImplementationCost { get; init; }
+        public DateTimeOffset? ImplementationStartedAt { get; init; }
+        public DateTimeOffset? ImplementationEndedAt { get; init; }
     }
 
     public async Task<List<string>> GetMfeModulesAsync(string organization, string project, string patToken, CancellationToken cancellationToken)
