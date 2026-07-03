@@ -37,6 +37,18 @@ internal sealed class DevOpsStoryItem
     public string? ImplementationCost { get; set; }
 
     /// <summary>
+    /// The orchestrator comment timestamp for the pre-flight checks message.
+    /// Used only for display in the tracker grid.
+    /// </summary>
+    public DateTimeOffset? ImplementationStartedAt { get; set; }
+
+    /// <summary>
+    /// The orchestrator comment timestamp for the implementation complete message.
+    /// Used only for display in the tracker grid.
+    /// </summary>
+    public DateTimeOffset? ImplementationEndedAt { get; set; }
+
+    /// <summary>
     /// The phase history summary loaded on-demand from orchestrator comments.
     /// Contains per-phase execution events, timings, and error tracking.
     /// </summary>

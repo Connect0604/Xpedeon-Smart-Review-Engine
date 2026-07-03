@@ -29,6 +29,8 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private bool IsLoadingStories;
     private bool IsLoadingAllImplementationDetails;
     private bool IsLoadingMfeModules;
+    private bool _isRunningStoriesExpanded = true;
+    private bool _isMfeFieldsExpanded = true;
     private List<DevOpsStoryItem> Stories = new();
     private List<MfeModuleItem> MfeModules = new();
     private PeriodicTimer? AutoReloadTimer;
@@ -163,17 +165,20 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     {
         if (startDate is null || completionDate is null)
         {
-            return "Implementation time not yet calculated. Start: Orchestrator plan approval, End: Testing Requested state";
+            return "Total time not yet calculated. Start: Plan Approved, End: Implementation Complete";
         }
 
         var startLocal = startDate.Value.ToLocalTime();
         var completionLocal = completionDate.Value.ToLocalTime();
 
-        return $"Started (Plan Approved): {startLocal:g}\nCompleted (Testing Requested): {completionLocal:g}";
+        return $"Started (Plan Approved): {startLocal:g}\nCompleted (Implementation Complete): {completionLocal:g}";
     }
 
     private static string FormatImplementationCost(string? cost) =>
         string.IsNullOrWhiteSpace(cost) ? "-" : $"${cost}";
+
+    private static string FormatDateTimeOrDash(DateTimeOffset? value) =>
+        value is null ? "-" : value.Value.ToLocalTime().ToString("g");
 
     private async Task LoadAllImplementationDetailsAsync()
     {
@@ -207,6 +212,16 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
         {
             IsLoadingAllImplementationDetails = false;
         }
+    }
+
+    private void ToggleRunningStoriesSection()
+    {
+        _isRunningStoriesExpanded = !_isRunningStoriesExpanded;
+    }
+
+    private void ToggleMfeFieldsSection()
+    {
+        _isMfeFieldsExpanded = !_isMfeFieldsExpanded;
     }
 
     private void SetActiveTab(string tabName)

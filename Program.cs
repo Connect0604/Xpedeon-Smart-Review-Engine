@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Components.Server.Circuits;
 using Microsoft.AspNetCore.Identity;
 using SmartReviewSystem;
 using SmartReviewSystem.Services.DevOps;
+using SmartReviewSystem.Services.MigrationProgressTracker;
 using SmartReviewSystem.Services.Ollama;
 using SmartReviewSystem.Services.Orchestration;
 
@@ -36,6 +37,8 @@ builder.Services.AddHttpClient<IAzureDevOpsService, AzureDevOpsService>(client =
 
 builder.Services.AddScoped(_ => new HttpClient());
 builder.Services.AddScoped<DevOpsDashboardState>();
+builder.Services.AddScoped<IMigrationProgressTrackerService, MigrationProgressTrackerService>();
+builder.Services.Configure<MigrationProgressTrackerOptions>(builder.Configuration.GetSection("MigrationProgressTracker"));
 builder.Services.AddHttpClient<IOllamaService, OllamaService>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(5);
