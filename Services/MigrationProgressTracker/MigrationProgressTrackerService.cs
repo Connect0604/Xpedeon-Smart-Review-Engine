@@ -11,7 +11,8 @@ internal sealed class MigrationProgressTrackerService(
     IConfiguration configuration,
     IAzureDevOpsService azureDevOpsService) : IMigrationProgressTrackerService
 {
-    private static readonly string[] StepTypeOrder = ["D", "R", "M"];
+    private static readonly string[] StepTypeOrder = ["M", "D", "R"];
+    private static readonly string[] ExcludedProcessCodes = ["BI", "EINVOICING", "PROPERTYSALES", "PROPERTYSALESMASTER"];
 
     public async Task<MigrationProgressTrackerViewModel> GetDashboardAsync(CancellationToken cancellationToken)
     {
@@ -31,7 +32,7 @@ internal sealed class MigrationProgressTrackerService(
             devOpsOptions.PatToken,
             options.AzureDevOpsStoryQuery,
             cancellationToken,
-            includeRevisionMetadata: false);
+            includeRevisionMetadata: true);
 
         return BuildDashboard(legacyRows, stories);
     }
@@ -85,6 +86,15 @@ WHERE PROCESS_CODE NOT IN
             .GroupBy(s => NormalizeKey(s.Title))
             .ToDictionary(g => g.Key, g => g.OrderBy(s => s.Id).First(), StringComparer.OrdinalIgnoreCase);
 
+        var overviewSourceItems = legacyRows.Select(row =>
+        {
+            storyMatches.TryGetValue(NormalizeKey(row.StepName), out var story);
+            return new MigrationProgressOverviewSourceItem(
+                row.StepType,
+                row.ProcessCode,
+                story?.CompletionDate);
+        }).ToList();
+
         var items = legacyRows.Select(row =>
         {
             storyMatches.TryGetValue(NormalizeKey(row.StepName), out var story);
@@ -133,17 +143,27 @@ WHERE PROCESS_CODE NOT IN
             })
             .ToList();
 
-        var totalLegacy = items.Count;
-        var totalCompleted = items.Count(i => string.Equals(i.Status, "Completed", StringComparison.OrdinalIgnoreCase));
+        var overview = MigrationProgressOverviewBuilder.Build(
+            overviewSourceItems,
+            ExcludedProcessCodes,
+            DateTimeOffset.UtcNow);
+
+        var totalLegacy = overviewSourceItems.Count;
+        var totalCompleted = overviewSourceItems.Count(item => item.CompletedAt is not null);
 
         return new MigrationProgressTrackerViewModel(
             totalLegacy,
             totalCompleted,
             totalLegacy - totalCompleted,
             GetPercentage(totalCompleted, totalLegacy),
+            ExcludedProcessCodes.OrderBy(code => code).ToList(),
+            overview,
             stepTypeSummaries,
             processSummaries);
     }
+
+    private static string NormalizeKey(string value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
 
     private static MigrationProgressStepTypeSummary BuildStepTypeSummary(string stepType, IReadOnlyCollection<MigrationProgressItem> items, string? processFilter = null)
     {
@@ -170,9 +190,6 @@ WHERE PROCESS_CODE NOT IN
                     g.OrderBy(i => i.StepCode).ToList()))
                 .ToList());
     }
-
-    private static string NormalizeKey(string value) =>
-        string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
 
     private static decimal GetPercentage(int completed, int total) =>
         total <= 0 ? 0 : Math.Round((decimal)completed * 100m / total, 1);

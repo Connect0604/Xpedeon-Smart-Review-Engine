@@ -341,8 +341,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 completionDate = orchestratorCompletionDate;
             }
             // Otherwise, fallback to "Testing Requested" state change
-            else if (startDate is not null &&
-                completionDate is null &&
+            else if (completionDate is null &&
                 changedDate is not null &&
                 string.Equals(currentState, "Testing Requested", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(previousState, "Testing Requested", StringComparison.OrdinalIgnoreCase))

@@ -104,6 +104,31 @@
     outline: none;
 }
 
+.migration-tracker-searchbar__clear {
+    border: 0;
+    background: rgba(107, 74, 142, .1);
+    color: #6b4a8e;
+    width: 1.7rem;
+    height: 1.7rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition: background-color .15s ease, transform .15s ease;
+}
+
+.migration-tracker-searchbar__clear:hover,
+.migration-tracker-searchbar__clear:focus-visible {
+    background: rgba(107, 74, 142, .18);
+    transform: scale(1.03);
+    outline: none;
+}
+
 .migration-tracker-refresh,
 .migration-tracker-tab,
 .migration-tracker-step-toggle,
@@ -173,7 +198,7 @@
 
 .migration-tracker-overall,
 .migration-tracker-group {
-    padding: 1rem 1.15rem;
+    padding: .75rem 1.15rem;
 }
 
 .migration-tracker-overall__header,
@@ -190,9 +215,80 @@
 
 .migration-tracker-overall__metric,
 .migration-tracker-group__metric {
-    font-size: 1.7rem;
+    font-size: 1.15rem;
     font-weight: 800;
     color: #6b4a8e;
+}
+
+.migration-tracker-overall__title-row {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    flex-wrap: wrap;
+}
+
+.migration-tracker-info-pill {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #ffd979 0%, #f4b740 100%);
+    color: #6a4100;
+    font-size: .78rem;
+    font-weight: 800;
+    cursor: help;
+    box-shadow: 0 4px 12px rgba(244, 183, 64, .22);
+}
+
+.migration-tracker-info-pill__tooltip {
+    position: absolute;
+    top: calc(100% + .55rem);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 16rem;
+    max-width: 24rem;
+    padding: .6rem .75rem;
+    border-radius: .75rem;
+    background: #fffaf0;
+    color: #6a4100;
+    box-shadow: 0 10px 24px rgba(48, 14, 82, .14);
+    border: 1px solid rgba(244, 183, 64, .45);
+    font-size: .78rem;
+    line-height: 1.4;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity .15s ease, visibility .15s ease;
+    z-index: 5;
+}
+
+.migration-tracker-info-pill:hover .migration-tracker-info-pill__tooltip,
+.migration-tracker-info-pill:focus-visible .migration-tracker-info-pill__tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+.migration-tracker-group__summary-line {
+    display: flex;
+    align-items: baseline;
+    gap: .7rem;
+    flex-wrap: wrap;
+}
+
+.migration-tracker-group__summary-line h2 {
+    font-size: 1rem;
+    line-height: 1.1;
+}
+
+.migration-tracker-group__submetric {
+    margin: 0;
+    font-size: .82rem;
+    font-weight: 600;
+    color: #6b4a8e;
+    opacity: .85;
 }
 
 .migration-tracker-process-card__toggle h2 {
@@ -207,7 +303,7 @@
     background: #f0e6f5;
     border-radius: 999px;
     overflow: hidden;
-    margin-top: 1rem;
+    margin-top: .55rem;
 }
 
 .migration-tracker-progress__fill {
@@ -221,6 +317,224 @@
 .migration-tracker-process-grid {
     display: grid;
     gap: 1rem;
+}
+
+.migration-tracker-kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: .85rem;
+}
+
+.migration-tracker-kpi-card,
+.migration-tracker-visual-card,
+.migration-tracker-insights-panel {
+    background: rgba(255, 255, 255, .94);
+    border-radius: 1rem;
+    border: 1px solid rgba(107, 74, 142, .12);
+    box-shadow: 0 12px 28px rgba(48, 14, 82, .08);
+}
+
+.migration-tracker-kpi-card {
+    padding: .95rem 1rem;
+    display: grid;
+    gap: .3rem;
+}
+
+.migration-tracker-kpi-card span,
+.migration-tracker-kpi-card small,
+.migration-tracker-overall__supporting,
+.migration-tracker-empty,
+.migration-tracker-card__badge,
+.migration-tracker-insight span,
+.migration-tracker-insight small {
+    color: #756d84;
+}
+
+.migration-tracker-kpi-card span,
+.migration-tracker-insight span {
+    font-size: .74rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-weight: 700;
+}
+
+.migration-tracker-kpi-card strong,
+.migration-tracker-insight strong {
+    font-size: 1.55rem;
+    line-height: 1.05;
+}
+
+.migration-tracker-kpi-card small,
+.migration-tracker-overall__supporting,
+.migration-tracker-empty,
+.migration-tracker-card__badge,
+.migration-tracker-insight small {
+    font-size: .78rem;
+}
+
+.migration-tracker-overview-hero {
+    display: grid;
+}
+
+.migration-tracker-overview-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr);
+    gap: 1rem;
+}
+
+.migration-tracker-visual-card {
+    padding: .9rem 1rem 1rem;
+    min-height: 19rem;
+    display: grid;
+    align-content: start;
+    gap: .75rem;
+}
+
+.migration-tracker-visual-card--wide {
+    grid-column: 1 / 2;
+}
+
+.migration-tracker-visual-card__header h3,
+.migration-tracker-insights-panel h3 {
+    margin: .15rem 0 0;
+    font-size: 1rem;
+}
+
+.migration-tracker-trend-switcher {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+    justify-content: flex-end;
+}
+
+.migration-tracker-trend-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .75rem;
+}
+
+.migration-tracker-series-key {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    color: #5f4a79;
+    font-size: .82rem;
+    font-weight: 700;
+}
+
+.migration-tracker-series-key__swatch {
+    width: .85rem;
+    height: .85rem;
+    border-radius: .2rem;
+    background: #7E5AA6;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
+}
+
+.migration-tracker-trend-toggle {
+    border: 1px solid rgba(107, 74, 142, .18);
+    background: rgba(255, 255, 255, .88);
+    color: #5c456f;
+    border-radius: 999px;
+    padding: .4rem .75rem;
+    font-size: .76rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.migration-tracker-trend-toggle.is-active {
+    background: linear-gradient(135deg, #7a57a4 0%, #5b397f 100%);
+    color: #fff;
+    border-color: transparent;
+}
+
+.migration-tracker-chart {
+    min-height: 14rem;
+}
+
+.migration-tracker-chart--donut {
+    min-height: 16rem;
+}
+
+.migration-tracker-chart :is(text, tspan) {
+    fill: #5f4a79;
+}
+
+.migration-tracker-chart :is(.dxc-title text, .dxc-title tspan) {
+    fill: #3f255f;
+}
+
+.migration-tracker-chart :is(.dxc-legend text, .dxc-legend tspan) {
+    fill: #5f4a79;
+}
+
+.migration-tracker-chart :is(.dxc-arg-elements text, .dxc-val-elements text, .dxc-axes text, .dxc-labels text) {
+    fill: #6f6282;
+}
+
+.migration-tracker-chart-tooltip {
+    display: inline-flex;
+    align-items: center;
+    padding: .4rem .55rem;
+    border-radius: .7rem;
+    background: rgba(227, 214, 241, .96);
+    color: #4b3167;
+    border: 1px solid rgba(122, 87, 164, .18);
+    box-shadow: 0 8px 18px rgba(48, 14, 82, .12);
+    font-size: .8rem;
+    font-weight: 700;
+}
+
+.migration-tracker-chart-tooltip strong {
+    font-size: .78rem;
+    letter-spacing: .04em;
+}
+
+.migration-tracker-overview-bottom {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(280px, .8fr);
+    gap: 1rem;
+    align-items: start;
+}
+
+.migration-tracker-card__badge {
+    display: inline-flex;
+    margin-top: .15rem;
+    font-weight: 600;
+}
+
+.migration-tracker-insights-panel {
+    padding: .9rem 1rem 1rem;
+    display: grid;
+    gap: .85rem;
+}
+
+.migration-tracker-insights-list {
+    display: grid;
+    gap: .75rem;
+}
+
+.migration-tracker-insight {
+    padding: .85rem .9rem;
+    border-radius: .85rem;
+    background: #faf8fc;
+    border: 1px solid rgba(107, 74, 142, .08);
+    display: grid;
+    gap: .25rem;
+}
+
+.migration-tracker-insight--good {
+    background: linear-gradient(180deg, rgba(229, 247, 234, .95) 0%, rgba(245, 252, 247, .98) 100%);
+}
+
+.migration-tracker-insight--warning {
+    background: linear-gradient(180deg, rgba(255, 245, 220, .95) 0%, rgba(255, 251, 241, .98) 100%);
+}
+
+.migration-tracker-insight--critical {
+    background: linear-gradient(180deg, rgba(255, 236, 235, .95) 0%, rgba(255, 247, 246, .98) 100%);
 }
 
 .migration-tracker-summary-grid {
@@ -244,8 +558,7 @@
     gap: .7rem;
 }
 
-.migration-tracker-card__header,
-.migration-tracker-process-card__summary {
+.migration-tracker-card__header {
     display: flex;
     justify-content: space-between;
     gap: .5rem;
@@ -259,6 +572,51 @@
     color: #6b4a8e;
     font-size: .8rem;
     font-weight: 700;
+}
+
+.migration-tracker-card--masters .migration-tracker-chip {
+    background: #ede3f9;
+    color: #6b4a8e;
+}
+
+.migration-tracker-card--masters {
+    background: linear-gradient(180deg, rgba(224, 203, 245, .98) 0%, rgba(242, 233, 250, .92) 28%, #fff 56%);
+}
+
+.migration-tracker-card--documents .migration-tracker-chip {
+    background: #e8f1fb;
+    color: #37659c;
+}
+
+.migration-tracker-card--documents {
+    background: linear-gradient(180deg, rgba(214, 232, 250, .98) 0%, rgba(235, 244, 252, .92) 28%, #fff 56%);
+}
+
+.migration-tracker-card--reports .migration-tracker-chip {
+    background: #f3ece2;
+    color: #9a6934;
+}
+
+.migration-tracker-card--reports {
+    background: linear-gradient(180deg, rgba(244, 229, 208, .98) 0%, rgba(249, 240, 228, .92) 28%, #fff 56%);
+}
+
+.migration-tracker-card--masters .migration-tracker-progress__fill,
+.migration-tracker-group--masters .migration-tracker-progress__fill,
+.migration-tracker-process-card__detail--masters .migration-tracker-progress__fill {
+    background: linear-gradient(90deg, #6b4a8e 0%, #c9a8e8 100%);
+}
+
+.migration-tracker-card--documents .migration-tracker-progress__fill,
+.migration-tracker-group--documents .migration-tracker-progress__fill,
+.migration-tracker-process-card__detail--documents .migration-tracker-progress__fill {
+    background: linear-gradient(90deg, #4f79a8 0%, #9fc1e3 100%);
+}
+
+.migration-tracker-card--reports .migration-tracker-progress__fill,
+.migration-tracker-group--reports .migration-tracker-progress__fill,
+.migration-tracker-process-card__detail--reports .migration-tracker-progress__fill {
+    background: linear-gradient(90deg, #b47a4d 0%, #e1b38a 100%);
 }
 
 .migration-tracker-card__metrics {
@@ -328,9 +686,45 @@
     border-bottom: 1px solid rgba(107, 74, 142, .12);
 }
 
+.migration-tracker-accordion__toggle {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(9rem, 11rem) minmax(7rem, 8rem);
+    align-items: center;
+}
+
 .migration-tracker-accordion__title {
     display: grid;
     gap: .2rem;
+    min-width: 0;
+}
+
+.migration-tracker-accordion__action {
+    display: grid;
+    justify-items: end;
+    gap: .3rem;
+    min-width: 7rem;
+}
+
+.migration-tracker-accordion__hint {
+    font-size: .7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #6b4a8e;
+}
+
+.migration-tracker-accordion__chevron {
+    width: .8rem;
+    height: .8rem;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform .16s ease;
+    color: rgba(107, 74, 142, .82);
+}
+
+.migration-tracker-accordion__toggle.is-expanded .migration-tracker-accordion__chevron {
+    transform: rotate(-135deg);
 }
 
 .migration-tracker-accordion__title h3 {
@@ -347,10 +741,76 @@
     gap: .2rem;
 }
 
+.migration-tracker-accordion__meta {
+    justify-items: end;
+}
+
+.migration-tracker-accordion__detail {
+    margin: .45rem .7rem .7rem;
+    padding: .8rem;
+    border-radius: .9rem;
+    max-height: min(28rem, 55vh);
+    overflow: auto;
+    box-shadow: inset 0 0 0 1px rgba(107, 74, 142, .08);
+}
+
+.migration-tracker-accordion__detail--masters {
+    background: linear-gradient(180deg, rgba(224, 206, 244, .96) 0%, rgba(245, 237, 251, 1) 100%);
+}
+
+.migration-tracker-accordion__detail--documents {
+    background: linear-gradient(180deg, rgba(216, 231, 247, .96) 0%, rgba(241, 247, 252, 1) 100%);
+}
+
+.migration-tracker-accordion__detail--reports {
+    background: linear-gradient(180deg, rgba(239, 226, 209, .96) 0%, rgba(250, 244, 236, 1) 100%);
+}
+
+.migration-tracker-accordion--masters .migration-tracker-accordion__hint,
+.migration-tracker-accordion--masters .migration-tracker-accordion__chevron {
+    color: #6b4a8e;
+}
+
+.migration-tracker-accordion--documents .migration-tracker-accordion__hint,
+.migration-tracker-accordion--documents .migration-tracker-accordion__chevron {
+    color: #37659c;
+}
+
+.migration-tracker-accordion--reports .migration-tracker-accordion__hint,
+.migration-tracker-accordion--reports .migration-tracker-accordion__chevron {
+    color: #9a6934;
+}
+
 .migration-tracker-process-card__detail {
-    padding: .55rem .8rem .8rem;
+    padding: .72rem .8rem .85rem;
     display: grid;
     gap: .4rem;
+    border-radius: .85rem;
+    margin: .15rem .8rem .75rem;
+    max-height: min(28rem, 55vh);
+    overflow: auto;
+    box-shadow: inset 0 0 0 1px rgba(107, 74, 142, .08);
+}
+
+.migration-tracker-process-card__detail--masters {
+    background: linear-gradient(180deg, rgba(224, 206, 244, .84) 0%, rgba(242, 233, 249, .98) 100%);
+}
+
+.migration-tracker-process-card__detail--documents {
+    background: linear-gradient(180deg, rgba(216, 231, 247, .84) 0%, rgba(240, 246, 252, .98) 100%);
+}
+
+.migration-tracker-process-card__detail--reports {
+    background: linear-gradient(180deg, rgba(239, 226, 209, .84) 0%, rgba(249, 243, 236, .98) 100%);
+}
+
+.migration-tracker-process-card__detail-toggle {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    text-align: left;
 }
 
 .migration-tracker-table {
@@ -371,7 +831,7 @@
     top: 0;
     z-index: 1;
     padding: .55rem .9rem;
-    background: #f5effa;
+    background: rgba(255, 255, 255, .72);
     border-radius: .75rem;
     font-size: .74rem;
     font-weight: 700;
@@ -381,7 +841,7 @@
 .migration-tracker-table__row {
     padding: .65rem .9rem;
     border-radius: .85rem;
-    background: #faf7fd;
+    background: rgba(255, 255, 255, .72);
 }
 
 .migration-tracker-table__cell {
@@ -407,22 +867,106 @@
     align-items: center;
 }
 
+.migration-tracker-process-card__detail-title h3 {
+    margin: .15rem 0 0;
+    font-size: .82rem;
+    font-weight: 700;
+}
+
 .migration-tracker-process-card__detail-header strong {
     color: #6b4a8e;
-    font-size: .95rem;
+    font-size: .82rem;
+}
+
+.migration-tracker-process-card__detail-icon {
+    display: none;
 }
 
 .migration-tracker-process-card__summary {
     padding: .55rem .8rem .35rem;
     border-bottom: 1px solid rgba(107, 74, 142, .08);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .65rem;
+    align-items: start;
+}
+
+.migration-tracker-process-card__summary-panel {
+    min-width: 0;
 }
 
 .migration-tracker-process-card__summary-item {
-    flex: 1 1 0;
-    min-width: 0;
+    width: 100%;
     border-radius: .75rem;
     background: #f8f3fb;
-    padding: .45rem .55rem;
+    padding: .5rem .6rem;
+    border: 0;
+    text-align: left;
+    display: grid;
+    gap: .12rem;
+    cursor: pointer;
+    position: relative;
+    box-shadow: inset 0 0 0 1px rgba(107, 74, 142, .06);
+    transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+
+.migration-tracker-process-card__summary-item:hover,
+.migration-tracker-process-card__summary-item:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: inset 0 0 0 1px rgba(107, 74, 142, .16), 0 8px 18px rgba(48, 14, 82, .08);
+    filter: saturate(1.04);
+    outline: none;
+}
+
+.migration-tracker-process-card__summary-item.is-expanded {
+    box-shadow: inset 0 0 0 1px rgba(107, 74, 142, .2), 0 10px 22px rgba(48, 14, 82, .1);
+}
+
+.migration-tracker-process-card__summary-chevron {
+    position: absolute;
+    top: .55rem;
+    right: .55rem;
+    width: .72rem;
+    height: .72rem;
+    border-right: 2px solid rgba(107, 74, 142, .72);
+    border-bottom: 2px solid rgba(107, 74, 142, .72);
+    transform: rotate(45deg);
+    transition: transform .16s ease;
+    opacity: .9;
+}
+
+.migration-tracker-process-card__summary-item.is-expanded .migration-tracker-process-card__summary-chevron {
+    transform: rotate(-135deg);
+}
+
+.migration-tracker-process-card__summary-item--masters {
+    background: linear-gradient(180deg, rgba(224, 206, 244, .98) 0%, rgba(242, 233, 249, .98) 100%);
+}
+
+.migration-tracker-process-card__summary-item--documents {
+    background: linear-gradient(180deg, rgba(216, 231, 247, .98) 0%, rgba(240, 246, 252, .98) 100%);
+}
+
+.migration-tracker-process-card__summary-item--reports {
+    background: linear-gradient(180deg, rgba(239, 226, 209, .98) 0%, rgba(249, 243, 236, .98) 100%);
+}
+
+.migration-tracker-process-card__summary-item--masters small,
+.migration-tracker-process-card__summary-item--masters .migration-tracker-process-card__summary-chevron {
+    color: #6b4a8e;
+    border-color: #6b4a8e;
+}
+
+.migration-tracker-process-card__summary-item--documents small,
+.migration-tracker-process-card__summary-item--documents .migration-tracker-process-card__summary-chevron {
+    color: #37659c;
+    border-color: #37659c;
+}
+
+.migration-tracker-process-card__summary-item--reports small,
+.migration-tracker-process-card__summary-item--reports .migration-tracker-process-card__summary-chevron {
+    color: #9a6934;
+    border-color: #9a6934;
 }
 
 .migration-tracker-process-card__summary-item span {
@@ -432,12 +976,12 @@
 }
 
 .migration-tracker-process-card__summary-item strong {
-    font-size: .92rem;
+    font-size: .88rem;
 }
 
 .migration-tracker-process-card__summary-item small {
     color: #7d768a;
-    font-size: .68rem;
+    font-size: .66rem;
 }
 
 .migration-tracker-status {
@@ -458,6 +1002,19 @@
 }
 
 @media (max-width: 900px) {
+    .migration-tracker-overview-grid,
+    .migration-tracker-overview-bottom {
+        grid-template-columns: 1fr;
+    }
+
+    .migration-tracker-visual-card--wide {
+        grid-column: auto;
+    }
+
+    .migration-tracker-kpi-strip {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+
     .migration-tracker-hero,
     .migration-tracker-overall__header,
     .migration-tracker-group__header,
@@ -472,6 +1029,15 @@
     .migration-tracker-process-card__metric {
         text-align: left;
         justify-items: start;
+    }
+
+    .migration-tracker-accordion__toggle {
+        grid-template-columns: 1fr;
+    }
+
+    .migration-tracker-accordion__action {
+        justify-items: start;
+        min-width: 0;
     }
 
     .migration-tracker-content {
@@ -516,5 +1082,12 @@
 
     .migration-tracker-hero__actions {
         align-self: flex-end;
+    }
+
+    .migration-tracker-info-pill__tooltip {
+        left: 0;
+        transform: none;
+        min-width: 12rem;
+        max-width: min(18rem, 80vw);
     }
 }
