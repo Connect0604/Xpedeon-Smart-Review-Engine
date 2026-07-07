@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -21,12 +21,16 @@
     <Compile Remove="MigrationDashboard.Web\Components\App.razor" />
     <Compile Remove="MigrationDashboard.Web\Components\Routes.razor" />
     <Compile Remove="SmartReviewSystem.Api\**\*.cs" />
+    <Compile Remove="tests\**\*.cs" />
     <Compile Remove="artifacts\**\*.cs" />
     <EmbeddedResource Remove="SmartReviewSystem.Api\**\*" />
+    <EmbeddedResource Remove="tests\**\*" />
     <EmbeddedResource Remove="artifacts\**\*" />
     <None Remove="SmartReviewSystem.Api\**\*" />
+    <None Remove="tests\**\*" />
     <None Remove="artifacts\**\*" />
     <Content Remove="SmartReviewSystem.Api\**\*" />
+    <Content Remove="tests\**\*" />
     <Content Remove="artifacts\**\*" />
   </ItemGroup>
 

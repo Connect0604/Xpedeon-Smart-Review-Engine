@@ -30,7 +30,7 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private bool IsLoadingAllImplementationDetails;
     private bool IsLoadingMfeModules;
     private bool _isRunningStoriesExpanded = true;
-    private bool _isMfeFieldsExpanded = true;
+    private bool _isMfeFieldsExpanded = false;
     private List<DevOpsStoryItem> Stories = new();
     private List<MfeModuleItem> MfeModules = new();
     private PeriodicTimer? AutoReloadTimer;

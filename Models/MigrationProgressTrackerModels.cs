@@ -47,11 +47,75 @@ internal sealed record MigrationProgressProcessSummary(
     decimal CompletionPercentage,
     List<MigrationProgressStepTypeSummary> StepTypeSummaries);
 
+internal sealed record MigrationProgressOverviewSourceItem(
+    string StepType,
+    string ProcessCode,
+    DateTimeOffset? CompletedAt);
+
+internal sealed record MigrationProgressOverviewKpi(
+    string Key,
+    string Label,
+    string Value,
+    string SupportingText);
+
+internal sealed record MigrationProgressChartDatum(
+    string Argument,
+    string Series,
+    decimal Value);
+
+internal enum MigrationProgressTrendGranularity
+{
+    Weekly,
+    Monthly,
+    Quarterly,
+    Yearly
+}
+
+internal sealed record MigrationProgressTrendPoint(
+    DateTimeOffset BucketStart,
+    DateTimeOffset BucketEnd,
+    string BucketLabel,
+    string TooltipLabel,
+    int CompletedCount);
+
+internal sealed record MigrationProgressTrendSeries(
+    MigrationProgressTrendGranularity Granularity,
+    string Label,
+    List<MigrationProgressTrendPoint> Points);
+
+internal sealed record MigrationProgressOverviewStepTypeTile(
+    string StepType,
+    string Label,
+    int Total,
+    int Completed,
+    int Pending,
+    decimal CompletionPercentage,
+    string Badge);
+
+internal sealed record MigrationProgressInsight(
+    string Key,
+    string Label,
+    string Value,
+    string SupportingText,
+    string Tone);
+
+internal sealed record MigrationProgressOverviewViewModel(
+    string CompletionHeadline,
+    List<MigrationProgressOverviewKpi> Kpis,
+    List<MigrationProgressChartDatum> StatusBreakdown,
+    List<MigrationProgressChartDatum> StepTypeComparison,
+    List<MigrationProgressChartDatum> PendingProcessRanking,
+    MigrationProgressTrendGranularity DefaultTrendGranularity,
+    List<MigrationProgressTrendSeries> CompletionTrends,
+    List<MigrationProgressOverviewStepTypeTile> StepTypeTiles,
+    List<MigrationProgressInsight> Insights);
+
 internal sealed record MigrationProgressTrackerViewModel(
     int TotalLegacy,
     int TotalCompleted,
     int TotalPending,
     decimal OverallCompletionPercentage,
+    List<string> ExcludedProcessCodes,
+    MigrationProgressOverviewViewModel Overview,
     List<MigrationProgressStepTypeSummary> StepTypeSummaries,
     List<MigrationProgressProcessSummary> ProcessSummaries);
-
