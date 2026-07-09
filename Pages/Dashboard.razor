@@ -52,6 +52,12 @@
                     <span>Story Tracker</span>
                     <span class="dashboard-tab__count">@Stories.Count</span>
                 </button>
+                <button type="button"
+                        class="dashboard-tab @(ActiveTab == "bugs" ? "dashboard-tab--active" : string.Empty)"
+                        @onclick="@(async () => SetActiveTab("bugs"))">
+                    <span>Bug Tracker</span>
+                    <span class="dashboard-tab__count">@TotalBugCount</span>
+                </button>
             </div>
         </div>
 
@@ -331,7 +337,7 @@
                                                         @{
                                                             var module = (MfeModuleItem)cellContext.DataItem;
                                                             <span class="mfe-module-name">
-                                                                <span class="mfe-module-status-dot @(module.StoriesCount == 0 ? "mfe-module-status-dot--none" : "mfe-module-status-dot--active")"></span>
+                                                                <span class="mfe-module-status-dot @(module.IsAvailable ? "mfe-module-status-dot--available" : "mfe-module-status-dot--unavailable")"></span>
                                                                 <span>@module.ModuleName</span>
                                                             </span>
                                                         }
@@ -342,6 +348,14 @@
                                                         @{
                                                             var module = (MfeModuleItem)cellContext.DataItem;
                                                             <span class="mfe-stories-badge">@module.StoriesCount</span>
+                                                        }
+                                                    </CellDisplayTemplate>
+                                                </DxGridDataColumn>
+                                                <DxGridDataColumn FieldName="@nameof(MfeModuleItem.ActivePrCount)" Caption="Active PRs" MinWidth="120" AllowSort="true">
+                                                    <CellDisplayTemplate Context="cellContext">
+                                                        @{
+                                                            var module = (MfeModuleItem)cellContext.DataItem;
+                                                            <span class="active-pr-badge @(module.ActivePrCount > 0 ? "active-pr-badge--yes" : "active-pr-badge--no")">@module.ActivePrCount</span>
                                                         }
                                                     </CellDisplayTemplate>
                                                 </DxGridDataColumn>
@@ -513,6 +527,7 @@
                                             }
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.BugCount)" Caption="Bug Count" MinWidth="100" />
                                 </Columns>
                             </DxGrid>
                         </div>
@@ -521,6 +536,122 @@
                     @if (!string.IsNullOrWhiteSpace(LoadError))
                     {
                         <p class="dashboard-error">@LoadError</p>
+                    }
+                </div>
+            }
+            else if (ActiveTab == "bugs")
+            {
+                <div class="dashboard-tab-pane">
+                    <div class="dashboard-toolbar dashboard-toolbar--bugs">
+                        <label class="dashboard-toolbar__search dashboard-filter-group dashboard-filter-group--bug-search">
+                            <span class="dashboard-filter-label">Search</span>
+                            <input class="dashboard-filter-input"
+                                   @bind="BugSearchText"
+                                   @bind:event="oninput"
+                                   placeholder="Search story ID, story title, bug ID, bug title, assignee, state" />
+                        </label>
+                        <button type="button"
+                                class="dashboard-group-toggle-btn"
+                                @onclick="CollapseAllBugGroups">
+                            Collapse All
+                        </button>
+                        <button type="button"
+                                class="dashboard-group-toggle-btn"
+                                @onclick="ExpandAllBugGroups">
+                            Expand All
+                        </button>
+                        
+                        <div class="dashboard-toolbar__meta">
+                            <span>Stories With Bugs: <strong>@BugGroups.Count</strong></span>
+                            <span>Total Bugs: <strong>@TotalBugCount</strong></span>
+                        </div>
+                    </div>
+
+                    @if (IsLoadingStories)
+                    {
+                        <div class="dashboard-empty">
+                            <p>Loading bugs from Azure DevOps...</p>
+                        </div>
+                    }
+                    else if (!HasConnectionSettings)
+                    {
+                        <div class="dashboard-empty">
+                            <p>Azure DevOps configuration is unavailable.</p>
+                        </div>
+                    }
+                    else if (BugGroups.Count == 0)
+                    {
+                        <div class="dashboard-empty">
+                            <p>No bugs found for the current user stories.</p>
+                        </div>
+                    }
+                    else if (FilteredBugTrackerRows.Count == 0)
+                    {
+                        <div class="dashboard-empty">
+                            <p>No bugs match the current bug tracker search.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="dashboard-table-wrap dashboard-table-wrap--bugs" @key="_bugGridRenderVersion">
+                            <DxGrid Data="FilteredBugTrackerRows"
+                                    ShowAllRows="true"
+                                    KeyFieldName="@nameof(BugTrackerRow.BugId)"
+                                    CssClass="dashboard-dxgrid dashboard-dxgrid--bugs"
+                                    AllowSort="true"
+                                    PagerVisible="false"
+                                    ShowSearchBox="false"
+                                    AutoExpandAllGroupRows="@_autoExpandAllBugGroups"
+                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
+                                <Columns>
+                                    <DxGridDataColumn FieldName="@nameof(BugTrackerRow.StoryGroupKey)"
+                                                      Caption="Story"
+                                                      GroupIndex="0"
+                                                      Visible="false">
+                                        <GroupRowTemplate Context="groupContext">
+                                            @{
+                                                var storyGroup = ParseStoryGroupKey(groupContext.GroupValue);
+                                            }
+                                            <div class="bug-story-group">
+                                                <a href="@FilteredBugTrackerRows.FirstOrDefault(row => row.StoryId.ToString() == storyGroup.StoryId)?.StoryWorkItemUrl"
+                                                   target="_blank"
+                                                   rel="noopener noreferrer"
+                                                   class="bug-story-group__id">
+                                                        @storyGroup.StoryId
+                                                </a>
+                                                <span class="bug-story-group__title">@storyGroup.StoryTitle</span>
+                                            </div>
+                                        </GroupRowTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(BugTrackerRow.BugId)" Caption="ID" Width="80">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var row = (BugTrackerRow)cellContext.DataItem;
+                                                <a href="@row.BugWorkItemUrl" target="_blank" rel="noopener noreferrer" class="story-id-badge">@row.BugId</a>
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(BugTrackerRow.BugTitle)" Caption="Bug Title" MinWidth="800" />
+                                    <DxGridDataColumn FieldName="@nameof(BugTrackerRow.AssignedTo)" Caption="Assigned To" MinWidth="120">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var row = (BugTrackerRow)cellContext.DataItem;
+                                                @DisplayOrDash(row.AssignedTo)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+
+                                    <DxGridDataColumn FieldName="@nameof(BugTrackerRow.State)" Caption="State" MinWidth="120">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var row = (BugTrackerRow)cellContext.DataItem;
+                                                @DisplayOrDash(row.State)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                </Columns>
+                            </DxGrid>
+                        </div>
                     }
                 </div>
             }
