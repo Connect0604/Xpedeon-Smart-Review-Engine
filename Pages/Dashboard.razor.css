@@ -519,9 +519,17 @@
 .dashboard-table-wrap {
     flex: 1;
     min-height: calc(50vh - 200px);
-    overflow: auto;
     border-radius: 12px;
     border: 1px solid #ede5f5;
+}
+
+.dashboard-table-wrap--running {
+    overflow: auto;
+}
+
+.dashboard-table-wrap--tracker {
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .dashboard-table {

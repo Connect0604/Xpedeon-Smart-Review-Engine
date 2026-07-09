@@ -26,7 +26,7 @@ internal static class DevOpsDashboardStoryFilter
                 story.OrchestratorPhase.Contains(search, StringComparison.OrdinalIgnoreCase));
         }
 
-        return query.OrderByDescending(story => story.Id);
+        return query.OrderBy(story => story.Id);
     }
 
     public static IEnumerable<DevOpsStoryItem> GetRunningStories(IEnumerable<DevOpsStoryItem> stories, string? filter = null)
@@ -39,6 +39,6 @@ internal static class DevOpsDashboardStoryFilter
             query = query.Where(story => string.Equals(story.State, "Coding In Progress", StringComparison.OrdinalIgnoreCase));
         }
 
-        return query.OrderByDescending(story => story.Id);
+        return query.OrderBy(story => story.Id);
     }
 }

@@ -1,4 +1,5 @@
 @page "/migration-progress-tracker"
+@implements IAsyncDisposable
 
 @using DevExpress.Blazor
 @using SmartReviewSystem.Models
@@ -123,8 +124,66 @@
                         </div>
                     </section>
 
+                    <section class="migration-tracker-overview-donut-grid">
+                        @if (CanRenderCharts && OverviewStepTypeCharts.Count > 0)
+                        {
+                            @foreach (var summary in OverviewStepTypeCharts)
+                            {
+                                var donutData = BuildOverviewStepTypeStatusBreakdown(summary);
+                                <article class="migration-tracker-visual-card migration-tracker-visual-card--@GetStepTypeSlug(summary.StepType)">
+                                    <div class="migration-tracker-visual-card__header">
+                                        <div>
+                                            <p class="migration-tracker-section-label">@summary.Label</p>
+                                            <h3>Completed vs Pending</h3>
+                                        </div>
+                                    </div>
+                                    @if (donutData.Count > 0)
+                                    {
+                                        <DxPieChart T="MigrationProgressChartDatum"
+                                                    @key="@($"step-type-donut-{ChartRenderVersion}-{summary.StepType}")"
+                                                    Data="@donutData"
+                                                    CssClass="migration-tracker-chart migration-tracker-chart--donut"
+                                                    InnerDiameter="0.64"
+                                                    LabelOverlap="PieChartLabelOverlap.Hide"
+                                                    Palette="@GetOverviewStepTypePalette(summary.StepType, summary)">
+                                            <DxPieChartSeries T="MigrationProgressChartDatum"
+                                                              TArgument="string"
+                                                              TValue="decimal"
+                                                              ArgumentField="@((MigrationProgressChartDatum point) => point.Argument)"
+                                                              ValueField="@((MigrationProgressChartDatum point) => point.Value)">
+                                                <DxChartSeriesLabel Visible="false" />
+                                            </DxPieChartSeries>
+                                            <DxChartLegend Visible="true"
+                                                           Position="RelativePosition.Outside"
+                                                           HorizontalAlignment="HorizontalAlignment.Right"
+                                                           VerticalAlignment="VerticalEdge.Top" />
+                                            <DxChartTooltip Enabled="true"
+                                                            Position="RelativePosition.Outside">
+                                                <ChildContent Context="tooltip">
+                                                    <div class="migration-tracker-chart-tooltip">
+                                                        <span>@tooltip.Point.Argument: @tooltip.Point.Value</span>
+                                                    </div>
+                                                </ChildContent>
+                                            </DxChartTooltip>
+                                        </DxPieChart>
+                                    }
+                                    else
+                                    {
+                                        <p class="migration-tracker-empty">No step type chart data is available yet.</p>
+                                    }
+                                </article>
+                            }
+                        }
+                        else
+                        {
+                            <article class="migration-tracker-visual-card migration-tracker-visual-card--compact">
+                                <p class="migration-tracker-empty">No step type chart data is available yet.</p>
+                            </article>
+                        }
+                    </section>
+
                     <section class="migration-tracker-overview-grid">
-                        <article class="migration-tracker-visual-card migration-tracker-visual-card--wide">
+                        <article class="migration-tracker-visual-card migration-tracker-visual-card--wide" data-chart-role="completion-trend">
                             <div class="migration-tracker-visual-card__header">
                                 <div>
                                     <p class="migration-tracker-section-label">Completion trend</p>
@@ -147,154 +206,113 @@
                                     </div>
                                 </div>
                             </div>
-                            @if (SelectedCompletionTrend.Count > 0)
+                            @if (CanRenderCharts && SelectedCompletionTrend.Count > 0)
                             {
-                                  <DxChart T="MigrationProgressTrendPoint"
-                                           Data="@SelectedCompletionTrend"
-                                           CssClass="migration-tracker-chart"
-                                           Palette="@TrendChartPalette">
-                                      <DxChartTitle Text="Completion Trend" />
-                                      <DxChartLegend Visible="false" />
-                                      <DxChartTooltip Enabled="true"
-                                                      Position="RelativePosition.Outside">
-                                          <ChildContent Context="tooltip">
-                                              <div class="migration-tracker-chart-tooltip">
-                                                  <span>Count: @tooltip.Point.Value</span>
-                                              </div>
-                                          </ChildContent>
-                                      </DxChartTooltip>
-                                     <DxChartLineSeries T="MigrationProgressTrendPoint"
-                                                         TArgument="string"
-                                                         TValue="int"
-                                                         Name="Completed"
-                                                         ArgumentField="@((MigrationProgressTrendPoint point) => point.BucketLabel)"
-                                                         ValueField="@((MigrationProgressTrendPoint point) => point.CompletedCount)" />
-                                 </DxChart>
-                             }
+                                <DxChart T="MigrationProgressTrendPoint"
+                                         @key="@($"completion-trend-{ChartRenderVersion}-{SelectedTrendGranularity}")"
+                                         Data="@SelectedCompletionTrend"
+                                         CssClass="migration-tracker-chart"
+                                         Palette="@TrendChartPalette">
+                                    <DxChartTitle Text="Completion Trend" />
+                                    <DxChartLegend Visible="false" />
+                                    <DxChartTooltip Enabled="true"
+                                                    Position="RelativePosition.Outside">
+                                        <ChildContent Context="tooltip">
+                                            <div class="migration-tracker-chart-tooltip">
+                                                <span>Count: @tooltip.Point.Value</span>
+                                            </div>
+                                        </ChildContent>
+                                    </DxChartTooltip>
+                                    <DxChartLineSeries T="MigrationProgressTrendPoint"
+                                                       TArgument="string"
+                                                       TValue="int"
+                                                       Name="Completed"
+                                                       ArgumentField="@((MigrationProgressTrendPoint point) => point.BucketLabel)"
+                                                       ValueField="@((MigrationProgressTrendPoint point) => point.CompletedCount)" />
+                                </DxChart>
+                            }
                             else
                             {
                                 <p class="migration-tracker-empty">No historical completion dates are available yet.</p>
                             }
                         </article>
 
-                        <article class="migration-tracker-visual-card">
-                            <div class="migration-tracker-visual-card__header">
-                                <div>
-                                    <p class="migration-tracker-section-label">Completion share</p>
-                                    <h3>Completed vs pending</h3>
-                                </div>
-                            </div>
-                            <DxPieChart T="MigrationProgressChartDatum"
-                                        Data="@Dashboard.Overview.StatusBreakdown"
-                                        CssClass="migration-tracker-chart migration-tracker-chart--donut"
-                                        InnerDiameter="0.64"
-                                        Palette="@StatusChartPalette">
-                                <DxPieChartSeries T="MigrationProgressChartDatum"
-                                                  TArgument="string"
-                                                  TValue="decimal"
-                                                  ArgumentField="@((MigrationProgressChartDatum point) => point.Argument)"
-                                                  ValueField="@((MigrationProgressChartDatum point) => point.Value)" />
-                            </DxPieChart>
-                        </article>
-
-                        <article class="migration-tracker-visual-card">
-                            <div class="migration-tracker-visual-card__header">
-                                <div>
-                                    <p class="migration-tracker-section-label">Step type comparison</p>
-                                    <h3>Completed vs pending by area</h3>
-                                </div>
-                            </div>
-                            <DxChart T="MigrationProgressChartDatum"
-                                     CssClass="migration-tracker-chart"
-                                     Palette="@StepTypeChartPalette">
-                                <DxChartTitle Text="Completion by Step Type" />
-                                <DxChartBarSeries T="MigrationProgressChartDatum"
-                                                  TArgument="string"
-                                                  TValue="decimal"
-                                                  Data="@OverviewCompletedStepTypeSeries"
-                                                  Name="Completed"
-                                                  ArgumentField="@((MigrationProgressChartDatum point) => point.Argument)"
-                                                  ValueField="@((MigrationProgressChartDatum point) => point.Value)" />
-                                <DxChartBarSeries T="MigrationProgressChartDatum"
-                                                  TArgument="string"
-                                                  TValue="decimal"
-                                                  Data="@OverviewPendingStepTypeSeries"
-                                                  Name="Pending"
-                                                  ArgumentField="@((MigrationProgressChartDatum point) => point.Argument)"
-                                                  ValueField="@((MigrationProgressChartDatum point) => point.Value)" />
-                            </DxChart>
-                        </article>
-
-                        <article class="migration-tracker-visual-card">
-                            <div class="migration-tracker-visual-card__header">
-                                <div>
-                                    <p class="migration-tracker-section-label">Backlog ranking</p>
-                                    <h3>Top pending process codes</h3>
-                                </div>
-                            </div>
-                            @if (Dashboard.Overview.PendingProcessRanking.Count > 0)
-                            {
-                                <DxChart T="MigrationProgressChartDatum"
-                                         Data="@Dashboard.Overview.PendingProcessRanking"
-                                         CssClass="migration-tracker-chart"
-                                         Palette="@BacklogChartPalette">
-                                    <DxChartTitle Text="Top Pending Process Codes" />
-                                    <DxChartBarSeries T="MigrationProgressChartDatum"
-                                                      TArgument="string"
-                                                      TValue="decimal"
-                                                      Name="Pending"
-                                                      ArgumentField="@((MigrationProgressChartDatum point) => point.Argument)"
-                                                      ValueField="@((MigrationProgressChartDatum point) => point.Value)" />
-                                </DxChart>
-                            }
-                            else
-                            {
-                                <p class="migration-tracker-empty">No pending process codes right now.</p>
-                            }
-                        </article>
                     </section>
 
                     <section class="migration-tracker-overview-bottom">
-                        <div class="migration-tracker-card-grid">
-                            @foreach (var summary in Dashboard.Overview.StepTypeTiles)
-                            {
-                                <button type="button" class="migration-tracker-card migration-tracker-card--@GetStepTypeSlug(summary.StepType)" @onclick="() => FocusStepType(summary.StepType)">
-                                    <div class="migration-tracker-card__header">
-                                        <h3>@summary.Label</h3>
-                                        <span class="migration-tracker-chip">@summary.StepType</span>
-                                    </div>
-                                    <div class="migration-tracker-card__metrics">
-                                        <div><span>Total</span><strong>@summary.Total</strong></div>
-                                        <div><span>Completed</span><strong>@summary.Completed</strong></div>
-                                        <div><span>Pending</span><strong>@summary.Pending</strong></div>
-                                        <div><span>Progress</span><strong>@summary.CompletionPercentage.ToString("0.0")%</strong></div>
-                                    </div>
-                                    <div class="migration-tracker-progress migration-tracker-progress--card">
-                                        <div class="migration-tracker-progress__fill" style="width:@summary.CompletionPercentage%"></div>
-                                    </div>
-                                    <small class="migration-tracker-card__badge">@summary.Badge</small>
-                                </button>
-                            }
-                        </div>
-
-                        <aside class="migration-tracker-insights-panel">
-                            <div class="migration-tracker-visual-card__header">
-                                <div>
-                                    <p class="migration-tracker-section-label">Insights</p>
-                                    <h3>Quick reads for migration leads</h3>
-                                </div>
-                            </div>
-                            <div class="migration-tracker-insights-list">
-                                @foreach (var insight in Dashboard.Overview.Insights)
+                        <div class="migration-tracker-overview-bottom__main">
+                            <div class="migration-tracker-overview-bottom__left">
+                            <div class="migration-tracker-card-grid">
+                                @foreach (var summary in Dashboard.Overview.StepTypeTiles)
                                 {
-                                    <article class="migration-tracker-insight migration-tracker-insight--@insight.Tone">
-                                        <span>@insight.Label</span>
-                                        <strong>@insight.Value</strong>
-                                        <small>@insight.SupportingText</small>
-                                    </article>
+                                    <button type="button" class="migration-tracker-card migration-tracker-card--@GetStepTypeSlug(summary.StepType)" @onclick="() => FocusStepType(summary.StepType)">
+                                        <div class="migration-tracker-card__header">
+                                            <h3>@summary.Label</h3>
+                                            <span class="migration-tracker-chip">@summary.StepType</span>
+                                        </div>
+                                        <div class="migration-tracker-card__metrics">
+                                            <div><span>Total</span><strong>@summary.Total</strong></div>
+                                            <div><span>Completed</span><strong>@summary.Completed</strong></div>
+                                            <div><span>Pending</span><strong>@summary.Pending</strong></div>
+                                            <div><span>Progress</span><strong>@summary.CompletionPercentage.ToString("0.0")%</strong></div>
+                                        </div>
+                                        <div class="migration-tracker-progress migration-tracker-progress--card">
+                                            <div class="migration-tracker-progress__fill" style="width:@summary.CompletionPercentage%"></div>
+                                        </div>
+                                        <small class="migration-tracker-card__badge">@summary.Badge</small>
+                                    </button>
                                 }
                             </div>
-                        </aside>
+
+                            <aside class="migration-tracker-insights-panel migration-tracker-insights-panel--horizontal">
+                                <div class="migration-tracker-visual-card__header">
+                                    <div>
+                                        <p class="migration-tracker-section-label">Insights</p>
+                                        <h3>Quick reads for migration leads</h3>
+                                    </div>
+                                </div>
+                                <div class="migration-tracker-insights-list">
+                                    @foreach (var insight in Dashboard.Overview.Insights)
+                                    {
+                                        <article class="migration-tracker-insight migration-tracker-insight--@insight.Tone">
+                                            <span>@insight.Label</span>
+                                            <strong>@insight.Value</strong>
+                                            <small>@insight.SupportingText</small>
+                                        </article>
+                                    }
+                                </div>
+                            </aside>
+                            </div>
+
+                            <article class="migration-tracker-visual-card migration-tracker-visual-card--compact">
+                                <div class="migration-tracker-visual-card__header">
+                                    <div>
+                                        <p class="migration-tracker-section-label">Backlog ranking</p>
+                                        <h3>Top pending process codes</h3>
+                                    </div>
+                                </div>
+                                @if (CanRenderCharts && PendingProcessRanking.Count > 0)
+                                {
+                                    <DxChart T="MigrationProgressChartDatum"
+                                             @key="@($"pending-process-chart-{ChartRenderVersion}")"
+                                             Data="@PendingProcessRanking"
+                                             CssClass="migration-tracker-chart"
+                                             Palette="@BacklogChartPalette">
+                                        <DxChartTitle Text="Top Pending Process Codes" />
+                                        <DxChartBarSeries T="MigrationProgressChartDatum"
+                                                          TArgument="string"
+                                                          TValue="decimal"
+                                                          Name="Pending"
+                                                          ArgumentField="@((MigrationProgressChartDatum point) => point.Argument)"
+                                                          ValueField="@((MigrationProgressChartDatum point) => point.Value)" />
+                                    </DxChart>
+                                }
+                                else
+                                {
+                                    <p class="migration-tracker-empty">No pending process codes right now.</p>
+                                }
+                            </article>
+                        </div>
                     </section>
                 }
                 else if (ActiveTab == ViewTab.ByStepType)
@@ -501,6 +519,10 @@
     private readonly HashSet<string> ExpandedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> ExpandedStepTypeProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> ExpandedProcessStepTypes = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource _loadCts = new();
+    private bool _chartsActivated;
+    private bool _isDisposed;
+    private int ChartRenderVersion;
     private bool IsLoading = true;
     private string ErrorMessage = string.Empty;
 
@@ -511,18 +533,16 @@
     private IEnumerable<MigrationProgressProcessSummary> ProcessSummariesOrdered =>
         Dashboard?.ProcessSummaries ?? [];
 
-    private IEnumerable<MigrationProgressChartDatum> OverviewCompletedStepTypeSeries =>
-        Dashboard?.Overview.StepTypeComparison
-            .Where(point => string.Equals(point.Series, "Completed", StringComparison.OrdinalIgnoreCase))
-        ?? [];
-
-    private IEnumerable<MigrationProgressChartDatum> OverviewPendingStepTypeSeries =>
-        Dashboard?.Overview.StepTypeComparison
-            .Where(point => string.Equals(point.Series, "Pending", StringComparison.OrdinalIgnoreCase))
-        ?? [];
+    private IReadOnlyList<MigrationProgressOverviewStepTypeTile> OverviewStepTypeCharts =>
+        (Dashboard?.Overview.StepTypeTiles ?? [])
+            .OrderBy(summary => StepTypeSortKey(summary.StepType))
+            .ToList();
 
     private IReadOnlyList<MigrationProgressTrendSeries> AvailableCompletionTrends =>
         Dashboard?.Overview.CompletionTrends ?? [];
+
+    private IReadOnlyList<MigrationProgressChartDatum> PendingProcessRanking =>
+        Dashboard?.Overview.PendingProcessRanking ?? [];
 
     private List<MigrationProgressTrendPoint> SelectedCompletionTrend =>
         AvailableCompletionTrends
@@ -530,9 +550,16 @@
             ?.Points
         ?? [];
 
+    private bool CanRenderCharts =>
+        !_isDisposed &&
+        !IsLoading &&
+        Dashboard is not null &&
+        _chartsActivated;
+
     private static readonly string[] TrendChartPalette = ["#7E5AA6", "#D7C7E8"];
-    private static readonly string[] StatusChartPalette = ["#8A63B7", "#E7DBF2"];
-    private static readonly string[] StepTypeChartPalette = ["#73539E", "#C5ABD9"];
+    private static readonly string[] MastersOverviewPalette = ["#6D4C92", "#D8C8EA"];
+    private static readonly string[] ReportsOverviewPalette = ["#B07A49", "#F0DDC7"];
+    private static readonly string[] DocumentsOverviewPalette = ["#5C84B4", "#D9E8F7"];
     private static readonly string[] BacklogChartPalette = ["#8661B2", "#D9C9EA"];
 
     private int FilteredItemCount =>
@@ -543,16 +570,44 @@
         await LoadAsync();
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chartsActivated || _isDisposed || IsLoading || Dashboard is null)
+        {
+            return;
+        }
+
+        _chartsActivated = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
     private async Task LoadAsync()
     {
+        var previousLoadCts = _loadCts;
+        _loadCts = new CancellationTokenSource();
+        previousLoadCts.Cancel();
+        previousLoadCts.Dispose();
+
+        var cancellationToken = _loadCts.Token;
         IsLoading = true;
         ErrorMessage = string.Empty;
+        _chartsActivated = false;
 
         try
         {
-            Dashboard = await TrackerService.GetDashboardAsync(CancellationToken.None);
+            var dashboard = await TrackerService.GetDashboardAsync(cancellationToken);
+            if (cancellationToken.IsCancellationRequested || _isDisposed)
+            {
+                return;
+            }
+
+            Dashboard = NormalizeDashboard(dashboard);
             SelectedStepType = Dashboard.StepTypeSummaries.FirstOrDefault()?.StepType ?? "D";
             SelectedTrendGranularity = Dashboard.Overview.DefaultTrendGranularity;
+            ChartRenderVersion++;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _isDisposed)
+        {
         }
         catch (Exception ex)
         {
@@ -562,7 +617,11 @@
         }
         finally
         {
-            IsLoading = false;
+            if (!cancellationToken.IsCancellationRequested && !_isDisposed)
+            {
+                IsLoading = false;
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 
@@ -693,5 +752,80 @@
 
     private static bool Contains(string? value, string term) =>
         !string.IsNullOrWhiteSpace(value) && value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private static List<MigrationProgressChartDatum> BuildOverviewStepTypeStatusBreakdown(MigrationProgressOverviewStepTypeTile summary) =>
+        [
+            ..BuildStatusBreakdownPoint("Completed", summary.Completed),
+            ..BuildStatusBreakdownPoint("Pending", summary.Pending)
+        ];
+
+    private static IEnumerable<MigrationProgressChartDatum> BuildStatusBreakdownPoint(string argument, int value)
+    {
+        if (value <= 0)
+        {
+            yield break;
+        }
+
+        yield return new MigrationProgressChartDatum(argument, "Status", value);
+    }
+
+    private static MigrationProgressTrackerViewModel NormalizeDashboard(MigrationProgressTrackerViewModel dashboard)
+    {
+        var overview = dashboard.Overview with
+        {
+            Kpis = dashboard.Overview.Kpis ?? [],
+            CompletedStepTypeBreakdown = dashboard.Overview.CompletedStepTypeBreakdown ?? [],
+            PendingStepTypeBreakdown = dashboard.Overview.PendingStepTypeBreakdown ?? [],
+            PendingProcessRanking = dashboard.Overview.PendingProcessRanking ?? [],
+            CompletionTrends = dashboard.Overview.CompletionTrends ?? [],
+            StepTypeTiles = dashboard.Overview.StepTypeTiles ?? [],
+            Insights = dashboard.Overview.Insights ?? []
+        };
+
+        return dashboard with
+        {
+            ExcludedProcessCodes = dashboard.ExcludedProcessCodes ?? [],
+            Overview = overview,
+            StepTypeSummaries = dashboard.StepTypeSummaries ?? [],
+            ProcessSummaries = dashboard.ProcessSummaries ?? []
+        };
+    }
+
+    private static string[] GetOverviewStepTypePalette(string stepType, MigrationProgressOverviewStepTypeTile summary)
+    {
+        var completedColor = GetCompletedDonutColor(stepType);
+        var pendingColor = GetPendingDonutColor(stepType);
+
+        if (summary.Completed <= 0 && summary.Pending > 0)
+        {
+            return [pendingColor, completedColor];
+        }
+
+        return [completedColor, pendingColor];
+    }
+
+    private static string GetCompletedDonutColor(string stepType) => stepType.ToUpperInvariant() switch
+    {
+        "M" => MastersOverviewPalette[0],
+        "R" => ReportsOverviewPalette[0],
+        "D" => DocumentsOverviewPalette[0],
+        _ => TrendChartPalette[0]
+    };
+
+    private static string GetPendingDonutColor(string stepType) => stepType.ToUpperInvariant() switch
+    {
+        "M" => MastersOverviewPalette[1],
+        "R" => ReportsOverviewPalette[1],
+        "D" => DocumentsOverviewPalette[1],
+        _ => TrendChartPalette[1]
+    };
+
+    public ValueTask DisposeAsync()
+    {
+        _isDisposed = true;
+        _loadCts.Cancel();
+        _loadCts.Dispose();
+        return ValueTask.CompletedTask;
+    }
 }
 

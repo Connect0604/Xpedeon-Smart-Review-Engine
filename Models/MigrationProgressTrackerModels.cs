@@ -102,8 +102,8 @@ internal sealed record MigrationProgressInsight(
 internal sealed record MigrationProgressOverviewViewModel(
     string CompletionHeadline,
     List<MigrationProgressOverviewKpi> Kpis,
-    List<MigrationProgressChartDatum> StatusBreakdown,
-    List<MigrationProgressChartDatum> StepTypeComparison,
+    List<MigrationProgressChartDatum> CompletedStepTypeBreakdown,
+    List<MigrationProgressChartDatum> PendingStepTypeBreakdown,
     List<MigrationProgressChartDatum> PendingProcessRanking,
     MigrationProgressTrendGranularity DefaultTrendGranularity,
     List<MigrationProgressTrendSeries> CompletionTrends,

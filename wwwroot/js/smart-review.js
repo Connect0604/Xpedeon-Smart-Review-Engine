@@ -1,6 +1,7 @@
 (function () {
     window.smartReview = window.smartReview || {};
     var html2CanvasLoaderPromise = null;
+    var visibilityObservers = new Map();
 
     function ensureHtml2Canvas() {
         if (window.html2canvas) {
@@ -92,5 +93,48 @@
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+    };
+
+    window.smartReview.observeElementVisibility = function (element, dotNetRef, callbackName) {
+        if (!element || !dotNetRef || !callbackName) {
+            return null;
+        }
+
+        var id = "observer-" + Math.random().toString(36).slice(2);
+
+        if (!("IntersectionObserver" in window)) {
+            dotNetRef.invokeMethodAsync(callbackName);
+            return id;
+        }
+
+        var observer = new IntersectionObserver(function (entries) {
+            for (var i = 0; i < entries.length; i++) {
+                var entry = entries[i];
+                if (!entry.isIntersecting) {
+                    continue;
+                }
+
+                dotNetRef.invokeMethodAsync(callbackName);
+                observer.disconnect();
+                visibilityObservers.delete(id);
+                break;
+            }
+        }, {
+            root: null,
+            threshold: 0.2
+        });
+
+        observer.observe(element);
+        visibilityObservers.set(id, observer);
+        return id;
+    };
+
+    window.smartReview.disposeVisibilityObserver = function (id) {
+        if (!id || !visibilityObservers.has(id)) {
+            return;
+        }
+
+        visibilityObservers.get(id).disconnect();
+        visibilityObservers.delete(id);
     };
 })();

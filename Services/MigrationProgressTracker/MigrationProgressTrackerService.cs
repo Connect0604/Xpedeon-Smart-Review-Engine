@@ -32,7 +32,7 @@ internal sealed class MigrationProgressTrackerService(
             devOpsOptions.PatToken,
             options.AzureDevOpsStoryQuery,
             cancellationToken,
-            includeRevisionMetadata: true);
+            includeRevisionMetadata: false);
 
         return BuildDashboard(legacyRows, stories);
     }
@@ -92,7 +92,7 @@ WHERE PROCESS_CODE NOT IN
             return new MigrationProgressOverviewSourceItem(
                 row.StepType,
                 row.ProcessCode,
-                story?.CompletionDate);
+                story?.OrchestratorPhaseUpdated);
         }).ToList();
 
         var items = legacyRows.Select(row =>
@@ -193,4 +193,7 @@ WHERE PROCESS_CODE NOT IN
 
     private static decimal GetPercentage(int completed, int total) =>
         total <= 0 ? 0 : Math.Round((decimal)completed * 100m / total, 1);
+
+    internal static MigrationProgressTrackerViewModel BuildDashboardForTests(List<LegacyInventoryRow> legacyRows, List<DevOpsStoryItem> stories) =>
+        BuildDashboard(legacyRows, stories);
 }

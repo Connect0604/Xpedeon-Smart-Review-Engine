@@ -55,19 +55,12 @@ internal static class MigrationProgressOverviewBuilder
             new("completed-this-month", "Completed This Month", completedThisMonth.ToString(), now.ToString("MMMM yyyy"))
         };
 
-        var statusBreakdown = new List<MigrationProgressChartDatum>
-        {
-            new("Completed", "Status", completed),
-            new("Pending", "Status", pending)
-        };
+        var completedStepTypeBreakdown = stepTypeTiles
+            .Select(tile => new MigrationProgressChartDatum(tile.Label, "Completed", tile.Completed))
+            .ToList();
 
-        var stepTypeComparison = stepTypeTiles
-            .SelectMany(tile => new[]
-            {
-                new MigrationProgressChartDatum(tile.Label, "Completed", tile.Completed),
-                new MigrationProgressChartDatum(tile.Label, "Pending", tile.Pending),
-                new MigrationProgressChartDatum(tile.Label, "Total", tile.Total)
-            })
+        var pendingStepTypeBreakdown = stepTypeTiles
+            .Select(tile => new MigrationProgressChartDatum(tile.Label, "Pending", tile.Pending))
             .ToList();
 
         var insights = new List<MigrationProgressInsight>
@@ -101,8 +94,8 @@ internal static class MigrationProgressOverviewBuilder
         return new MigrationProgressOverviewViewModel(
             $"{completed} of {total} completed",
             kpis,
-            statusBreakdown,
-            stepTypeComparison,
+            completedStepTypeBreakdown,
+            pendingStepTypeBreakdown,
             topPendingProcesses,
             MigrationProgressTrendGranularity.Weekly,
             completionTrends,
