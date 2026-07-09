@@ -21,6 +21,7 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private string DevOpsPatToken = string.Empty;
     private string SearchText = string.Empty;
     private string RunningSearchText = string.Empty;
+    private string BugSearchText = string.Empty;
     private string StateFilter = "Any";
     private string OrchestratorFilter = "Coding In Progress";
     private string ActiveTab = "running";
@@ -29,9 +30,13 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private bool IsLoadingStories;
     private bool IsLoadingAllImplementationDetails;
     private bool IsLoadingMfeModules;
+    private bool _autoExpandAllBugGroups;
+    private int _bugGridRenderVersion;
     private bool _isRunningStoriesExpanded = true;
     private bool _isMfeFieldsExpanded = false;
     private List<DevOpsStoryItem> Stories = new();
+    private List<StoryBugGroup> BugGroups = new();
+    private List<BugTrackerRow> BugTrackerRows = new();
     private List<MfeModuleItem> MfeModules = new();
     private PeriodicTimer? AutoReloadTimer;
     private bool AutoReloadEnabled;
@@ -53,6 +58,13 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
                    (s.ExecutionMode?.Contains(RunningSearchText, StringComparison.OrdinalIgnoreCase) ?? false) ||
                    (s.OrchestratorPhase?.Contains(RunningSearchText, StringComparison.OrdinalIgnoreCase) ?? false))
             .ToList();
+
+    private List<BugTrackerRow> FilteredBugTrackerRows =>
+        BugTrackerRows
+            .Where(MatchesBugSearch)
+            .ToList();
+
+    private int TotalBugCount => BugGroups.Sum(group => group.BugCount);
 
     private bool HasConnectionSettings =>
         !string.IsNullOrWhiteSpace(DevOpsOrganization) &&
@@ -82,6 +94,22 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
         if (DashboardState.HasLoadedOnce)
         {
             Stories = DashboardState.Stories.ToList();
+            BugGroups = DashboardState.BugGroups.ToList();
+            BugTrackerRows = BugGroups
+                .SelectMany(group => group.Bugs.Select(bug => new BugTrackerRow
+                {
+                    StoryId = group.Story.Id,
+                    StoryTitle = group.Story.Title,
+                    StoryWorkItemUrl = group.Story.WorkItemUrl,
+                    BugId = bug.Id,
+                    BugTitle = bug.Title,
+                    AssignedTo = bug.AssignedTo,
+                    State = bug.State,
+                    BugWorkItemUrl = bug.WorkItemUrl
+                }))
+                .OrderBy(row => row.StoryId)
+                .ThenBy(row => row.BugId)
+                .ToList();
             ConnectionStatus = DashboardState.ConnectionStatus;
             LoadError = DashboardState.LoadError;
             await LoadMfeModulesAsync();
@@ -126,12 +154,15 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
                 CancellationToken.None,
                 includeRevisionMetadata: false);
 
+            await LoadBugDataAsync();
+
             ConnectionStatus = Stories.Count == 0 ? "No stories found" : "Connected";
-            DashboardState.SetStories(Stories, ConnectionStatus);
+            DashboardState.SetStories(Stories, ConnectionStatus, bugGroups: BugGroups);
         }
         catch (Exception ex)
         {
             Stories = new List<DevOpsStoryItem>();
+            BugGroups = new List<StoryBugGroup>();
             LoadError = $"Failed to load stories: {ex.Message}";
             ConnectionStatus = "Failed";
             DashboardState.MarkLoadAttempt(ConnectionStatus, LoadError);
@@ -229,6 +260,18 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
         ActiveTab = tabName;
     }
 
+    private void ExpandAllBugGroups()
+    {
+        _autoExpandAllBugGroups = true;
+        _bugGridRenderVersion++;
+    }
+
+    private void CollapseAllBugGroups()
+    {
+        _autoExpandAllBugGroups = false;
+        _bugGridRenderVersion++;
+    }
+
     private async Task HandleOrchestratorFilterChanged(ChangeEventArgs args)
     {
         OrchestratorFilter = args.Value?.ToString() ?? "Coding In Progress";
@@ -265,10 +308,33 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
             var codingInProgressStories = DevOpsDashboardStoryFilter.GetRunningStories(Stories, "Coding In Progress").ToList();
             System.Diagnostics.Debug.WriteLine($"LoadMfeModulesAsync: Found {codingInProgressStories.Count} stories in 'Coding In Progress'");
 
-            var storiesByModule = codingInProgressStories
+            var storiesWithMfe = codingInProgressStories
                 .Where(s => !string.IsNullOrWhiteSpace(s.Mfe))
+                .ToList();
+
+            var storiesByModule = storiesWithMfe
                 .GroupBy(s => s.Mfe)
                 .ToDictionary(g => g.Key, g => g.Count());
+
+            var allStoriesWithMfe = Stories
+                .Where(story => !string.IsNullOrWhiteSpace(story.Mfe))
+                .ToList();
+
+            var activePullRequestsByStory = await AzureDevOpsService.GetActivePullRequestCountsByStoryAsync(
+                DevOpsOrganization.Trim(),
+                DevOpsProject.Trim(),
+                DevOpsPatToken.Trim(),
+                allStoriesWithMfe.Select(story => story.Id),
+                CancellationToken.None);
+
+            var activePullRequestsByModule = allStoriesWithMfe
+                .GroupBy(story => story.Mfe)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .Where(story => activePullRequestsByStory.TryGetValue(story.Id, out _))
+                        .SelectMany(story => activePullRequestsByStory[story.Id])
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase));
 
             System.Diagnostics.Debug.WriteLine($"LoadMfeModulesAsync: Stories by module: {string.Join(", ", storiesByModule.Select(x => $"{x.Key}:{x.Value}"))}");
 
@@ -277,7 +343,9 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
                 .Select(moduleName => new MfeModuleItem
                 {
                     ModuleName = moduleName,
-                    StoriesCount = storiesByModule.TryGetValue(moduleName, out var count) ? count : 0
+                    StoriesCount = storiesByModule.TryGetValue(moduleName, out var count) ? count : 0,
+                    ActivePrCount = activePullRequestsByModule.TryGetValue(moduleName, out var activePrs) ? activePrs.Count : 0,
+                    IsAvailable = !activePullRequestsByModule.TryGetValue(moduleName, out var modulePullRequests) || modulePullRequests.Count == 0
                 })
                 .OrderByDescending(m => m.StoriesCount)
                 .ThenBy(m => m.ModuleName)
@@ -296,6 +364,102 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
         {
             IsLoadingMfeModules = false;
         }
+    }
+
+    private async Task LoadBugDataAsync()
+    {
+        foreach (var story in Stories)
+        {
+            story.BugCount = 0;
+        }
+
+        BugGroups = new List<StoryBugGroup>();
+        BugTrackerRows = new List<BugTrackerRow>();
+        if (Stories.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var bugMap = await AzureDevOpsService.GetChildBugsByStoryAsync(
+                DevOpsOrganization.Trim(),
+                DevOpsProject.Trim(),
+                DevOpsPatToken.Trim(),
+                Stories.Select(story => story.Id),
+                CancellationToken.None);
+
+            foreach (var story in Stories)
+            {
+                if (!bugMap.TryGetValue(story.Id, out var bugs))
+                {
+                    continue;
+                }
+
+                story.BugCount = bugs.Count;
+            }
+
+            BugGroups = Stories
+                .Where(story => story.BugCount > 0)
+                .Select(story => new StoryBugGroup
+                {
+                    Story = story,
+                    Bugs = bugMap.TryGetValue(story.Id, out var bugs) ? bugs.OrderBy(bug => bug.Id).ToList() : new List<DevOpsBugItem>()
+                })
+                .ToList();
+
+            BugTrackerRows = BugGroups
+                .SelectMany(group => group.Bugs.Select(bug => new BugTrackerRow
+                {
+                    StoryId = group.Story.Id,
+                    StoryTitle = group.Story.Title,
+                    StoryWorkItemUrl = group.Story.WorkItemUrl,
+                    BugId = bug.Id,
+                    BugTitle = bug.Title,
+                    AssignedTo = bug.AssignedTo,
+                    State = bug.State,
+                    BugWorkItemUrl = bug.WorkItemUrl
+                }))
+                .OrderBy(row => row.StoryId)
+                .ThenBy(row => row.BugId)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error loading dashboard bugs: {ex.Message}");
+            BugGroups = new List<StoryBugGroup>();
+            BugTrackerRows = new List<BugTrackerRow>();
+        }
+    }
+
+    private bool MatchesBugSearch(BugTrackerRow row)
+    {
+        var search = BugSearchText?.Trim();
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return true;
+        }
+
+        return row.StoryId.ToString().Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               row.StoryTitle.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               row.BugId.ToString().Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               row.BugTitle.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               row.AssignedTo.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               row.State.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (string StoryId, string StoryTitle) ParseStoryGroupKey(object? groupValue)
+    {
+        var rawValue = groupValue?.ToString() ?? string.Empty;
+        var separatorIndex = rawValue.IndexOf("|||", StringComparison.Ordinal);
+        if (separatorIndex < 0)
+        {
+            return (rawValue, string.Empty);
+        }
+
+        var storyId = rawValue[..separatorIndex];
+        var storyTitle = rawValue[(separatorIndex + 3)..];
+        return (storyId, storyTitle);
     }
 
     private async Task LoadPhaseHistoryAsync(DevOpsStoryItem story)

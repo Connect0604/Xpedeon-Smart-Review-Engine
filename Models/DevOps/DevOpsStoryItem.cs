@@ -16,6 +16,7 @@ internal sealed class DevOpsStoryItem
     public string ExecutionMode { get; init; } = string.Empty;
     public string? BranchName { get; init; }
     public string WorkItemUrl { get; init; } = string.Empty;
+    public int BugCount { get; set; }
     public List<DevOpsAttachmentItem> Attachments { get; init; } = new();
 
     /// <summary>

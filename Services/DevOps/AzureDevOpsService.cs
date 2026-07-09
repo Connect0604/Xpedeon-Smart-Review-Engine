@@ -19,6 +19,130 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         PropertyNameCaseInsensitive = true
     };
 
+    public async Task<Dictionary<int, List<DevOpsBugItem>>> GetChildBugsByStoryAsync(
+        string organization,
+        string project,
+        string patToken,
+        IEnumerable<int> storyIds,
+        CancellationToken cancellationToken)
+    {
+        var uniqueStoryIds = storyIds
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        var bugMap = uniqueStoryIds.ToDictionary(id => id, _ => new List<DevOpsBugItem>());
+        if (uniqueStoryIds.Count == 0)
+        {
+            return bugMap;
+        }
+
+        var baseUrl = $"https://dev.azure.com/{organization}/{project}/_apis/wit";
+        var allBugIds = new HashSet<int>();
+        const int storyBatchSize = 200;
+
+        foreach (var storyBatch in uniqueStoryIds.Chunk(storyBatchSize))
+        {
+            using var wiqlRequest = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/wiql?api-version=7.1");
+            ApplyPatHeader(wiqlRequest, patToken);
+            var parentIds = string.Join(",", storyBatch.OrderBy(id => id));
+            wiqlRequest.Content = JsonContent.Create(new
+            {
+                query = $"SELECT [System.Id],[System.Title],[System.State],[System.WorkItemType],[System.AssignedTo],[System.Parent] FROM WorkItems WHERE [System.Parent] IN ({parentIds}) AND [System.WorkItemType] = 'Bug' ORDER BY [System.Id]"
+            });
+
+            using var wiqlResponse = await httpClient.SendAsync(wiqlRequest, cancellationToken);
+            wiqlResponse.EnsureSuccessStatusCode();
+
+            var wiqlData = await wiqlResponse.Content.ReadFromJsonAsync<WiqlResponse>(JsonOptions, cancellationToken);
+            foreach (var bugId in wiqlData?.WorkItems?.Select(w => w.Id).Where(id => id > 0) ?? Enumerable.Empty<int>())
+            {
+                allBugIds.Add(bugId);
+            }
+        }
+
+        if (allBugIds.Count == 0)
+        {
+            return bugMap;
+        }
+
+        var bugItemsById = await GetWorkItemsByIdAsync(baseUrl, patToken, allBugIds, cancellationToken);
+        foreach (var bug in bugItemsById.Values.OrderBy(bug => bug.ParentStoryId).ThenBy(bug => bug.Id))
+        {
+            if (bugMap.TryGetValue(bug.ParentStoryId, out var storyBugs))
+            {
+                storyBugs.Add(bug);
+            }
+        }
+
+        return bugMap;
+    }
+
+    public async Task<Dictionary<int, HashSet<string>>> GetActivePullRequestCountsByStoryAsync(
+        string organization,
+        string project,
+        string patToken,
+        IEnumerable<int> storyIds,
+        CancellationToken cancellationToken)
+    {
+        var uniqueStoryIds = storyIds
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        var activePullRequestsByStory = uniqueStoryIds.ToDictionary(
+            id => id,
+            _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+        if (uniqueStoryIds.Count == 0)
+        {
+            return activePullRequestsByStory;
+        }
+
+        var storyPullRequests = new Dictionary<int, HashSet<PullRequestArtifactRef>>();
+
+        foreach (var storyId in uniqueStoryIds)
+        {
+            try
+            {
+                var workItem = await GetWorkItemWithRelationsAsync(organization, project, patToken, storyId, cancellationToken);
+                var pullRequests = ExtractPullRequestRelations(workItem.Relations);
+                storyPullRequests[storyId] = pullRequests;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetActivePullRequestCountsByStoryAsync: Failed to load relations for story {storyId}: {ex.Message}");
+                storyPullRequests[storyId] = new HashSet<PullRequestArtifactRef>();
+            }
+        }
+
+        var activePullRequests = new HashSet<PullRequestArtifactRef>();
+        foreach (var pullRequest in storyPullRequests.Values.SelectMany(prs => prs).Distinct())
+        {
+            try
+            {
+                if (await IsPullRequestActiveAsync(organization, project, patToken, pullRequest, cancellationToken))
+                {
+                    activePullRequests.Add(pullRequest);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetActivePullRequestCountsByStoryAsync: Failed to load PR {pullRequest.RepositoryId}/{pullRequest.PullRequestId}: {ex.Message}");
+            }
+        }
+
+        foreach (var (storyId, pullRequests) in storyPullRequests)
+        {
+            activePullRequestsByStory[storyId] = pullRequests
+                .Where(activePullRequests.Contains)
+                .Select(pr => pr.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return activePullRequestsByStory;
+    }
+
     public async Task<List<DevOpsStoryItem>> GetStoriesWithAttachmentsAsync(
         string organization,
         string project,
@@ -55,19 +179,10 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
 
         foreach (var batch in ids.Chunk(workItemBatchSize))
         {
-            var idsParam = string.Join(",", batch);
-            using var workItemsRequest = new HttpRequestMessage(
-                HttpMethod.Get,
-                $"{baseUrl}/workitems?ids={idsParam}&$expand=Relations&api-version=7.1");
-            ApplyPatHeader(workItemsRequest, patToken);
-
-            using var workItemsResponse = await httpClient.SendAsync(workItemsRequest, cancellationToken);
-            workItemsResponse.EnsureSuccessStatusCode();
-
-            var workItemsData = await workItemsResponse.Content.ReadFromJsonAsync<WorkItemsResponse>(JsonOptions, cancellationToken);
-            if (workItemsData?.Value is { Count: > 0 })
+            var workItemsData = await GetWorkItemsBatchAsync(baseUrl, patToken, batch, includeRelations: true, cancellationToken);
+            if (workItemsData.Count > 0)
             {
-                items.AddRange(workItemsData.Value);
+                items.AddRange(workItemsData);
             }
         }
 
@@ -140,7 +255,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 Mfe = mfe,
                 ExecutionMode = executionMode,
                 BranchName = branchName,
-                WorkItemUrl = $"https://dev.azure.com/{Uri.EscapeDataString(organization)}/{Uri.EscapeDataString(project)}/_workitems/edit/{item.Id}",
+                WorkItemUrl = BuildWorkItemUrl(organization, project, item.Id),
                 Attachments = attachments
             });
         }
@@ -212,6 +327,174 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         }
 
         return assignedValue.ToString() ?? "Unassigned";
+    }
+
+    private async Task<Dictionary<int, DevOpsBugItem>> GetWorkItemsByIdAsync(
+        string baseUrl,
+        string patToken,
+        IEnumerable<int> workItemIds,
+        CancellationToken cancellationToken)
+    {
+        var bugs = new Dictionary<int, DevOpsBugItem>();
+
+        foreach (var batch in workItemIds.Chunk(100))
+        {
+            var workItems = await GetWorkItemsBatchAsync(baseUrl, patToken, batch, includeRelations: false, cancellationToken);
+            foreach (var item in workItems)
+            {
+                var workItemType = item.Fields.TryGetValue("System.WorkItemType", out var typeValue) ? typeValue?.ToString() ?? "Bug" : "Bug";
+                var title = item.Fields.TryGetValue("System.Title", out var titleValue) ? titleValue?.ToString() ?? "(No title)" : "(No title)";
+                var state = item.Fields.TryGetValue("System.State", out var stateValue) ? stateValue?.ToString() ?? "Unknown" : "Unknown";
+                var assigned = item.Fields.TryGetValue("System.AssignedTo", out var assignedValue) ? ExtractAssignedTo(assignedValue) : "Unassigned";
+
+                bugs[item.Id] = new DevOpsBugItem
+                {
+                    Id = item.Id,
+                    WorkItemType = workItemType,
+                    Title = title,
+                    State = state,
+                    AssignedTo = assigned,
+                    ParentStoryId = GetFieldInt(item.Fields, "System.Parent"),
+                    WorkItemUrl = BuildWorkItemUrlFromBaseUrl(baseUrl, item.Id)
+                };
+            }
+        }
+
+        return bugs;
+    }
+
+    private async Task<List<WorkItemDto>> GetWorkItemsBatchAsync(
+        string baseUrl,
+        string patToken,
+        IEnumerable<int> ids,
+        bool includeRelations,
+        CancellationToken cancellationToken)
+    {
+        var idsParam = string.Join(",", ids);
+        using var workItemsRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            includeRelations
+                ? $"{baseUrl}/workitems?ids={idsParam}&$expand=Relations&api-version=7.1"
+                : $"{baseUrl}/workitems?ids={idsParam}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.AssignedTo,System.Parent&api-version=7.1");
+        ApplyPatHeader(workItemsRequest, patToken);
+
+        using var workItemsResponse = await httpClient.SendAsync(workItemsRequest, cancellationToken);
+        workItemsResponse.EnsureSuccessStatusCode();
+
+        var workItemsData = await workItemsResponse.Content.ReadFromJsonAsync<WorkItemsResponse>(JsonOptions, cancellationToken);
+        return workItemsData?.Value is { Count: > 0 } ? workItemsData.Value : new List<WorkItemDto>();
+    }
+
+    private async Task<WorkItemDto> GetWorkItemWithRelationsAsync(
+        string organization,
+        string project,
+        string patToken,
+        int storyId,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"https://dev.azure.com/{organization}/{project}/_apis/wit/workItems/{storyId}?$expand=relations&api-version=7.1");
+        ApplyPatHeader(request, patToken);
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var workItem = await response.Content.ReadFromJsonAsync<WorkItemDto>(JsonOptions, cancellationToken);
+        return workItem ?? new WorkItemDto();
+    }
+
+    private async Task<bool> IsPullRequestActiveAsync(
+        string organization,
+        string project,
+        string patToken,
+        PullRequestArtifactRef pullRequest,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{pullRequest.RepositoryId}/pullrequests/{pullRequest.PullRequestId}?api-version=7.1");
+        ApplyPatHeader(request, patToken);
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var detail = await response.Content.ReadFromJsonAsync<PullRequestDetailDto>(JsonOptions, cancellationToken);
+        return string.Equals(detail?.Status, "active", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static HashSet<PullRequestArtifactRef> ExtractPullRequestRelations(IEnumerable<RelationDto>? relations)
+    {
+        var pullRequests = new HashSet<PullRequestArtifactRef>();
+
+        foreach (var relation in relations ?? Enumerable.Empty<RelationDto>())
+        {
+            if (!string.Equals(relation.Rel, "ArtifactLink", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var relationName = relation.Attributes?.TryGetValue("name", out var nameValue) == true
+                ? nameValue?.ToString()
+                : null;
+
+            if (!string.Equals(relationName, "Pull Request", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (TryParsePullRequestArtifactUrl(relation.Url, out var pullRequest))
+            {
+                pullRequests.Add(pullRequest);
+            }
+        }
+
+        return pullRequests;
+    }
+
+    private static bool TryParsePullRequestArtifactUrl(string? artifactUrl, out PullRequestArtifactRef pullRequest)
+    {
+        pullRequest = default;
+
+        if (string.IsNullOrWhiteSpace(artifactUrl))
+        {
+            return false;
+        }
+
+        const string prefix = "vstfs:///Git/PullRequestId/";
+        if (!artifactUrl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var encodedPath = artifactUrl[prefix.Length..];
+        var decodedPath = Uri.UnescapeDataString(encodedPath);
+        var segments = decodedPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length != 3)
+        {
+            return false;
+        }
+
+        if (!int.TryParse(segments[2], out var pullRequestId))
+        {
+            return false;
+        }
+
+        pullRequest = new PullRequestArtifactRef(segments[0], segments[1], pullRequestId);
+        return true;
+    }
+
+    private static string BuildWorkItemUrl(string organization, string project, int workItemId) =>
+        $"https://dev.azure.com/{Uri.EscapeDataString(organization)}/{Uri.EscapeDataString(project)}/_workitems/edit/{workItemId}";
+
+    private static string BuildWorkItemUrlFromBaseUrl(string baseUrl, int workItemId)
+    {
+        const string witSegment = "/_apis/wit";
+        var rootUrl = baseUrl.EndsWith(witSegment, StringComparison.OrdinalIgnoreCase)
+            ? baseUrl[..^witSegment.Length]
+            : baseUrl;
+
+        return $"{rootUrl}/_workitems/edit/{workItemId}";
     }
 
     private static long? TryParseLong(object? value)
@@ -580,6 +863,29 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         return DateTimeOffset.TryParse(value.ToString(), out var parsedDate) ? parsedDate : null;
     }
 
+    private static int GetFieldInt(Dictionary<string, object?> fields, string fieldName)
+    {
+        if (!fields.TryGetValue(fieldName, out var value) || value is null)
+        {
+            return 0;
+        }
+
+        if (value is JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var intValue))
+            {
+                return intValue;
+            }
+
+            if (element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out var stringValue))
+            {
+                return stringValue;
+            }
+        }
+
+        return int.TryParse(value.ToString(), out var parsed) ? parsed : 0;
+    }
+
     private sealed class WiqlResponse
     {
         public List<WiqlWorkItem> WorkItems { get; init; } = new();
@@ -617,6 +923,16 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         public string? Rel { get; init; }
         public string? Url { get; init; }
         public Dictionary<string, object?>? Attributes { get; init; }
+    }
+
+    private readonly record struct PullRequestArtifactRef(string ProjectId, string RepositoryId, int PullRequestId)
+    {
+        public string Key => $"{RepositoryId}/{PullRequestId}";
+    }
+
+    private sealed class PullRequestDetailDto
+    {
+        public string? Status { get; init; }
     }
 
     private sealed class CommentsResponse
