@@ -9,6 +9,7 @@ namespace SmartReviewSystem.Services.DevOps;
 internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsService
 {
     private const string OrchestratorPhaseFieldName = "Custom.OrchestratorPhase";
+    private const string OrchestratorPhaseUpdatedFieldName = "Custom.OrchestratorPhaseUpdated";
     private const string MfeFieldName = "Custom.Module";
     private const string ExecutionModeFieldName = "Custom.ExecutionMode";
     private const string ClaudeBranchFieldName = "Custom.ClaudeBranch";
@@ -43,23 +44,32 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         wiqlResponse.EnsureSuccessStatusCode();
 
         var wiqlData = await wiqlResponse.Content.ReadFromJsonAsync<WiqlResponse>(JsonOptions, cancellationToken);
-        var ids = wiqlData?.WorkItems?.Select(w => w.Id).Where(id => id > 0).Take(200).ToList() ?? new List<int>();
+        var ids = wiqlData?.WorkItems?.Select(w => w.Id).Where(id => id > 0).ToList() ?? new List<int>();
         if (ids.Count == 0)
         {
             return new List<DevOpsStoryItem>();
         }
 
-        var idsParam = string.Join(",", ids);
-        using var workItemsRequest = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"{baseUrl}/workitems?ids={idsParam}&$expand=Relations&api-version=7.1");
-        ApplyPatHeader(workItemsRequest, patToken);
+        const int workItemBatchSize = 100;
+        var items = new List<WorkItemDto>();
 
-        using var workItemsResponse = await httpClient.SendAsync(workItemsRequest, cancellationToken);
-        workItemsResponse.EnsureSuccessStatusCode();
+        foreach (var batch in ids.Chunk(workItemBatchSize))
+        {
+            var idsParam = string.Join(",", batch);
+            using var workItemsRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"{baseUrl}/workitems?ids={idsParam}&$expand=Relations&api-version=7.1");
+            ApplyPatHeader(workItemsRequest, patToken);
 
-        var workItemsData = await workItemsResponse.Content.ReadFromJsonAsync<WorkItemsResponse>(JsonOptions, cancellationToken);
-        var items = workItemsData?.Value ?? new List<WorkItemDto>();
+            using var workItemsResponse = await httpClient.SendAsync(workItemsRequest, cancellationToken);
+            workItemsResponse.EnsureSuccessStatusCode();
+
+            var workItemsData = await workItemsResponse.Content.ReadFromJsonAsync<WorkItemsResponse>(JsonOptions, cancellationToken);
+            if (workItemsData?.Value is { Count: > 0 })
+            {
+                items.AddRange(workItemsData.Value);
+            }
+        }
 
         // Only fetch revision metadata if requested (saves 200+ API calls if not needed)
         List<StoryRevisionMetadata> allRevisions = new();
@@ -88,6 +98,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             var assigned = item.Fields.TryGetValue("System.AssignedTo", out var assignedValue) ? ExtractAssignedTo(assignedValue) : "Unassigned";
             var tags = item.Fields.TryGetValue("System.Tags", out var tagsValue) ? tagsValue?.ToString() ?? string.Empty : string.Empty;
             var orchestratorPhase = item.Fields.TryGetValue(OrchestratorPhaseFieldName, out var phaseValue) ? phaseValue?.ToString() ?? string.Empty : string.Empty;
+            var orchestratorPhaseUpdated = GetFieldDate(item.Fields, OrchestratorPhaseUpdatedFieldName);
             var mfe = item.Fields.TryGetValue(MfeFieldName, out var mfeValue) ? mfeValue?.ToString() ?? string.Empty : string.Empty;
             var executionMode = item.Fields.TryGetValue(ExecutionModeFieldName, out var executionModeValue) ? executionModeValue?.ToString() ?? string.Empty : string.Empty;
             var branchName = item.Fields.TryGetValue(ClaudeBranchFieldName, out var branchValue) ? branchValue?.ToString() : null;
@@ -123,7 +134,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 AssignedTo = assigned,
                 Tags = tags,
                 OrchestratorPhase = orchestratorPhase,
-                OrchestratorPhaseUpdated = revisionMetadata.OrchestratorPhaseUpdated,
+                OrchestratorPhaseUpdated = orchestratorPhaseUpdated ?? revisionMetadata.OrchestratorPhaseUpdated,
                 StartDate = revisionMetadata.StartDate,
                 CompletionDate = revisionMetadata.CompletionDate,
                 Mfe = mfe,

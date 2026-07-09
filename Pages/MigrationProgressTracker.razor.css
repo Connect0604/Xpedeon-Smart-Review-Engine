@@ -58,8 +58,8 @@
     margin: 0 0 .35rem 0;
     text-transform: uppercase;
     letter-spacing: .12em;
-    font-size: .65rem;
-    color: #6b4a8e;
+    font-size: .7rem;
+    color: #4f2f73;
     font-weight: 700;
 }
 
@@ -198,7 +198,7 @@
 
 .migration-tracker-overall,
 .migration-tracker-group {
-    padding: .75rem 1.15rem;
+    padding: .65rem .95rem;
 }
 
 .migration-tracker-overall__header,
@@ -215,7 +215,7 @@
 
 .migration-tracker-overall__metric,
 .migration-tracker-group__metric {
-    font-size: 1.15rem;
+    font-size: 1rem;
     font-weight: 800;
     color: #6b4a8e;
 }
@@ -279,16 +279,16 @@
 }
 
 .migration-tracker-group__summary-line h2 {
-    font-size: 1rem;
+    font-size: 1.06rem;
     line-height: 1.1;
 }
 
 .migration-tracker-group__submetric {
     margin: 0;
-    font-size: .82rem;
+    font-size: .88rem;
     font-weight: 600;
-    color: #6b4a8e;
-    opacity: .85;
+    color: #4a2a71;
+    opacity: .96;
 }
 
 .migration-tracker-process-card__toggle h2 {
@@ -321,8 +321,8 @@
 
 .migration-tracker-kpi-strip {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: .85rem;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: .7rem;
 }
 
 .migration-tracker-kpi-card,
@@ -335,9 +335,9 @@
 }
 
 .migration-tracker-kpi-card {
-    padding: .95rem 1rem;
+    padding: .75rem .85rem;
     display: grid;
-    gap: .3rem;
+    gap: .2rem;
 }
 
 .migration-tracker-kpi-card span,
@@ -352,7 +352,7 @@
 
 .migration-tracker-kpi-card span,
 .migration-tracker-insight span {
-    font-size: .74rem;
+    font-size: .68rem;
     text-transform: uppercase;
     letter-spacing: .08em;
     font-weight: 700;
@@ -360,7 +360,7 @@
 
 .migration-tracker-kpi-card strong,
 .migration-tracker-insight strong {
-    font-size: 1.55rem;
+    font-size: 1.35rem;
     line-height: 1.05;
 }
 
@@ -369,7 +369,7 @@
 .migration-tracker-empty,
 .migration-tracker-card__badge,
 .migration-tracker-insight small {
-    font-size: .78rem;
+    font-size: .72rem;
 }
 
 .migration-tracker-overview-hero {
@@ -378,26 +378,37 @@
 
 .migration-tracker-overview-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 1rem;
 }
 
+.migration-tracker-overview-donut-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: .8rem;
+}
+
 .migration-tracker-visual-card {
-    padding: .9rem 1rem 1rem;
-    min-height: 19rem;
+    padding: .75rem .85rem .85rem;
+    min-height: 11.25rem;
     display: grid;
     align-content: start;
-    gap: .75rem;
+    gap: .2rem;
 }
 
 .migration-tracker-visual-card--wide {
-    grid-column: 1 / 2;
+    grid-column: 1 / -1;
+    padding-bottom: 1rem;
+}
+
+.migration-tracker-visual-card--compact {
+    width: 100%;
 }
 
 .migration-tracker-visual-card__header h3,
 .migration-tracker-insights-panel h3 {
     margin: .15rem 0 0;
-    font-size: 1rem;
+    font-size: .92rem;
 }
 
 .migration-tracker-trend-switcher {
@@ -420,7 +431,7 @@
     align-items: center;
     gap: .45rem;
     color: #5f4a79;
-    font-size: .82rem;
+    font-size: .75rem;
     font-weight: 700;
 }
 
@@ -437,8 +448,8 @@
     background: rgba(255, 255, 255, .88);
     color: #5c456f;
     border-radius: 999px;
-    padding: .4rem .75rem;
-    font-size: .76rem;
+    padding: .35rem .65rem;
+    font-size: .7rem;
     font-weight: 700;
     letter-spacing: .04em;
     transition: background-color .15s ease, color .15s ease, border-color .15s ease;
@@ -451,11 +462,42 @@
 }
 
 .migration-tracker-chart {
-    min-height: 14rem;
+    min-height: 10rem;
+}
+
+.migration-tracker-visual-card--wide .migration-tracker-chart {
+    min-height: 15rem;
 }
 
 .migration-tracker-chart--donut {
-    min-height: 16rem;
+    min-height: 9.5rem;
+    max-width: 18rem;
+    margin: -.1rem auto 0;
+}
+
+.migration-tracker-chart-placeholder {
+    min-height: 14rem;
+    border-radius: .95rem;
+    border: 1px dashed rgba(107, 74, 142, .24);
+    background: linear-gradient(180deg, rgba(247, 241, 252, .95) 0%, rgba(255, 255, 255, .98) 100%);
+    color: #5f4a79;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    text-align: center;
+    gap: .55rem;
+    padding: 1.2rem;
+}
+
+.migration-tracker-chart-placeholder strong {
+    color: #4b216f;
+    font-size: .92rem;
+}
+
+.migration-tracker-chart-placeholder span {
+    max-width: 24rem;
+    font-size: .8rem;
+    color: #756d84;
 }
 
 .migration-tracker-chart :is(text, tspan) {
@@ -464,6 +506,8 @@
 
 .migration-tracker-chart :is(.dxc-title text, .dxc-title tspan) {
     fill: #3f255f;
+    font-size: 1rem;
+    font-weight: 600;
 }
 
 .migration-tracker-chart :is(.dxc-legend text, .dxc-legend tspan) {
@@ -478,7 +522,6 @@
     display: inline-flex;
     align-items: center;
     padding: .4rem .55rem;
-    border-radius: .7rem;
     background: rgba(227, 214, 241, .96);
     color: #4b3167;
     border: 1px solid rgba(122, 87, 164, .18);
@@ -494,14 +537,25 @@
 
 .migration-tracker-overview-bottom {
     display: grid;
-    grid-template-columns: minmax(0, 1.5fr) minmax(280px, .8fr);
+    gap: 1rem;
+}
+
+.migration-tracker-overview-bottom__main {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(320px, .9fr);
     gap: 1rem;
     align-items: start;
 }
 
+.migration-tracker-overview-bottom__left {
+    display: grid;
+    gap: 1rem;
+    align-content: start;
+}
+
 .migration-tracker-card__badge {
     display: inline-flex;
-    margin-top: .15rem;
+    margin-top: .45rem;
     font-weight: 600;
 }
 
@@ -511,9 +565,17 @@
     gap: .85rem;
 }
 
+.migration-tracker-insights-panel--horizontal {
+    width: 100%;
+}
+
 .migration-tracker-insights-list {
     display: grid;
     gap: .75rem;
+}
+
+.migration-tracker-insights-panel--horizontal .migration-tracker-insights-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .migration-tracker-insight {
@@ -523,6 +585,11 @@
     border: 1px solid rgba(107, 74, 142, .08);
     display: grid;
     gap: .25rem;
+}
+
+.migration-tracker-insights-panel--horizontal .migration-tracker-insight strong {
+    font-size: 1.15rem;
+    line-height: 1.05;
 }
 
 .migration-tracker-insight--good {
@@ -549,13 +616,20 @@
 }
 
 .migration-tracker-card-grid {
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
 }
 
 .migration-tracker-card {
     text-align: left;
     display: grid;
     gap: .7rem;
+    align-content: start;
+}
+
+.migration-tracker-card .migration-tracker-progress--card {
+    margin-top: .95rem;
 }
 
 .migration-tracker-card__header {
@@ -663,6 +737,21 @@
     padding-bottom: 1rem;
     display: grid;
     gap: 1rem;
+}
+
+@media (max-width: 1500px) {
+    .migration-tracker-hero {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .migration-tracker-hero__search,
+    .migration-tracker-hero__actions {
+        justify-self: stretch;
+    }
+
+    .migration-tracker-overview-bottom__main {
+        grid-template-columns: 1fr;
+    }
 }
 
 .migration-tracker-group {
@@ -1002,8 +1091,11 @@
 }
 
 @media (max-width: 900px) {
+    .migration-tracker-overview-donut-grid,
     .migration-tracker-overview-grid,
-    .migration-tracker-overview-bottom {
+    .migration-tracker-overview-bottom,
+    .migration-tracker-overview-bottom__main,
+    .migration-tracker-insights-panel--horizontal .migration-tracker-insights-list {
         grid-template-columns: 1fr;
     }
 
