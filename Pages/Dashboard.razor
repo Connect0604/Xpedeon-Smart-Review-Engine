@@ -110,7 +110,7 @@
                                         ShowSearchBox="false"
                                         DetailRowDisplayMode="GridDetailRowDisplayMode.Auto"
                                         DetailExpandButtonDisplayMode="GridDetailExpandButtonDisplayMode.Auto"
-                                        FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Never">
+                                        FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
                                     <Columns>
                                         <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="ID" Width="100">
                                             <CellDisplayTemplate Context="cellContext">
@@ -438,9 +438,9 @@
                                     AllowSort="true"
                                     PagerVisible="false"
                                     ShowSearchBox="false"
-                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Never">
+                                    FilterMenuButtonDisplayMode="GridFilterMenuButtonDisplayMode.Always">
                                 <Columns>
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="ID" Width="70">
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Id)" Caption="ID" Width="80">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
@@ -467,6 +467,7 @@
                                             }
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.BugCount)" Caption="Bug Count" MinWidth="100" />
                                     <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Mfe)" Caption="MFE" MinWidth="100">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
@@ -527,7 +528,6 @@
                                             }
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.BugCount)" Caption="Bug Count" MinWidth="100" />
                                 </Columns>
                             </DxGrid>
                         </div>

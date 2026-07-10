@@ -443,6 +443,35 @@
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
 }
 
+.migration-tracker-chart-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: .2rem;
+    padding: .2rem;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(117, 84, 157, .12) 0%, rgba(117, 84, 157, .06) 100%);
+    border: 1px solid rgba(107, 74, 142, .14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6);
+}
+
+.migration-tracker-chart-mode-toggle__button {
+    border: none;
+    background: transparent;
+    color: #634c78;
+    border-radius: 999px;
+    padding: .38rem .8rem;
+    font-size: .72rem;
+    font-weight: 800;
+    letter-spacing: .03em;
+    transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+
+.migration-tracker-chart-mode-toggle__button.is-active {
+    background: linear-gradient(135deg, #7a57a4 0%, #5b397f 100%);
+    color: #fff;
+    box-shadow: 0 .35rem .9rem rgba(91, 57, 127, .22);
+}
+
 .migration-tracker-trend-toggle {
     border: 1px solid rgba(107, 74, 142, .18);
     background: rgba(255, 255, 255, .88);
@@ -949,6 +978,109 @@
     word-break: break-word;
 }
 
+.migration-tracker-diagnostics-summary {
+    margin: 0 0 .85rem 0;
+    color: #5b4d76;
+    font-size: .9rem;
+}
+
+.migration-tracker-diagnostics-filters {
+    display: grid;
+    grid-template-columns: minmax(260px, 1.6fr) repeat(3, minmax(160px, .7fr));
+    gap: .75rem;
+    margin-bottom: .9rem;
+    align-items: end;
+}
+
+.migration-tracker-diagnostics-filters__search {
+    max-width: none;
+}
+
+.migration-tracker-diagnostics-filter {
+    display: grid;
+    gap: .35rem;
+}
+
+.migration-tracker-diagnostics-filter span {
+    font-size: .68rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-weight: 700;
+    color: #6b4a8e;
+}
+
+.migration-tracker-diagnostics-filter select {
+    width: 100%;
+    border: 1px solid rgba(107, 74, 142, .18);
+    background: rgba(255, 255, 255, .94);
+    color: #2d1b4e;
+    border-radius: .85rem;
+    padding: .7rem .8rem;
+    font-size: .86rem;
+    box-shadow: 0 2px 8px rgba(75, 33, 111, .04);
+}
+
+.migration-tracker-diagnostics-table {
+    display: grid;
+    gap: .35rem;
+}
+
+.migration-tracker-diagnostics-table__head,
+.migration-tracker-diagnostics-table__row {
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) minmax(160px, 1fr) minmax(120px, .8fr) minmax(220px, 1.25fr) minmax(150px, .8fr) minmax(220px, 1fr) minmax(260px, 1.45fr);
+    gap: .6rem;
+    align-items: start;
+}
+
+.migration-tracker-diagnostics-table__head {
+    padding: .55rem .9rem;
+    background: rgba(255, 255, 255, .72);
+    border-radius: .75rem;
+    font-size: .74rem;
+    font-weight: 700;
+    color: #6b4a8e;
+}
+
+.migration-tracker-diagnostics-table__row {
+    padding: .7rem .9rem;
+    border-radius: .85rem;
+    background: rgba(248, 243, 251, .92);
+    border: 1px solid rgba(107, 74, 142, .08);
+}
+
+.migration-tracker-diagnostics-table__cell {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: .2rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: .84rem;
+}
+
+.migration-tracker-diagnostics-table__cell a {
+    word-break: break-word;
+}
+
+.migration-tracker-diagnostics-table__meta {
+    color: #7d768a;
+    font-size: .72rem;
+}
+
+.migration-tracker-diagnostics-reason {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+    padding: .28rem .58rem;
+    border-radius: 999px;
+    background: rgba(107, 74, 142, .1);
+    color: #5a3185;
+    font-size: .76rem;
+    font-weight: 700;
+}
+
 .migration-tracker-process-card__detail-header {
     display: flex;
     justify-content: space-between;
@@ -1107,6 +1239,10 @@
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     }
 
+    .migration-tracker-diagnostics-filters {
+        grid-template-columns: 1fr;
+    }
+
     .migration-tracker-hero,
     .migration-tracker-overall__header,
     .migration-tracker-group__header,
@@ -1143,7 +1279,16 @@
         grid-template-columns: 1fr;
     }
 
+    .migration-tracker-diagnostics-table__head,
+    .migration-tracker-diagnostics-table__row {
+        grid-template-columns: 1fr;
+    }
+
     .migration-tracker-table__head {
+        display: none;
+    }
+
+    .migration-tracker-diagnostics-table__head {
         display: none;
     }
 
@@ -1153,7 +1298,22 @@
         font-size: .8rem;
     }
 
+    .migration-tracker-diagnostics-table__cell {
+        display: grid;
+        gap: .2rem;
+        font-size: .8rem;
+    }
+
     .migration-tracker-table__cell::before {
+        content: attr(data-label);
+        font-size: .66rem;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: #7d768a;
+        font-weight: 700;
+    }
+
+    .migration-tracker-diagnostics-table__cell::before {
         content: attr(data-label);
         font-size: .66rem;
         text-transform: uppercase;
