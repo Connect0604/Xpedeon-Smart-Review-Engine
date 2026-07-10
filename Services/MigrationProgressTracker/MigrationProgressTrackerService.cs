@@ -13,6 +13,11 @@ internal sealed class MigrationProgressTrackerService(
 {
     private static readonly string[] StepTypeOrder = ["M", "D", "R"];
     private static readonly string[] ExcludedProcessCodes = ["BI", "EINVOICING", "PROPERTYSALES", "PROPERTYSALESMASTER"];
+    private const string OrchestratorDashboardStoryQuery = "[System.WorkItemType] = 'User Story' AND [System.Tags] CONTAINS 'AI development with revised orchestration'";
+    private const string MissingStoryReason = "No matching DevOps story title";
+    private const string MissingPageReason = "Matched story found, but PAGE_NAME is blank";
+    private const string MissingPhaseUpdatedReason = "Matched form is completed, but OrchestratorPhaseUpdated is missing";
+    private const string MissingLegacyStepReason = "DevOps story exists in orchestrator tracker, but no legacy STEP_NAME matches";
 
     public async Task<MigrationProgressTrackerViewModel> GetDashboardAsync(CancellationToken cancellationToken)
     {
@@ -34,7 +39,15 @@ internal sealed class MigrationProgressTrackerService(
             cancellationToken,
             includeRevisionMetadata: false);
 
-        return BuildDashboard(legacyRows, stories);
+        var orchestratorStories = await azureDevOpsService.GetStoriesWithAttachmentsAsync(
+            devOpsOptions.Organization,
+            devOpsOptions.Project,
+            devOpsOptions.PatToken,
+            OrchestratorDashboardStoryQuery,
+            cancellationToken,
+            includeRevisionMetadata: false);
+
+        return BuildDashboard(legacyRows, stories, orchestratorStories);
     }
 
     private static async Task<List<LegacyInventoryRow>> LoadLegacyInventoryAsync(string connectionString, CancellationToken cancellationToken)
@@ -45,7 +58,9 @@ SELECT
     PROCESS_CODE,
     STEP_CODE,
     STEP_NAME,
-    PAGE_NAME
+    PAGE_NAME,
+    MICRO_FRONTEND_NAME,
+    FORM_NAME
 FROM dbo.PC_PROCESS_STEPS_DEFAULT
 WHERE PROCESS_CODE NOT IN
 (
@@ -66,6 +81,8 @@ WHERE PROCESS_CODE NOT IN
         var stepCodeOrdinal = reader.GetOrdinal("STEP_CODE");
         var stepNameOrdinal = reader.GetOrdinal("STEP_NAME");
         var pageNameOrdinal = reader.GetOrdinal("PAGE_NAME");
+        var microFrontendNameOrdinal = reader.GetOrdinal("MICRO_FRONTEND_NAME");
+        var formNameOrdinal = reader.GetOrdinal("FORM_NAME");
 
         while (await reader.ReadAsync(cancellationToken))
         {
@@ -74,25 +91,57 @@ WHERE PROCESS_CODE NOT IN
                 reader.IsDBNull(processCodeOrdinal) ? string.Empty : reader.GetString(processCodeOrdinal),
                 reader.IsDBNull(stepCodeOrdinal) ? string.Empty : reader.GetString(stepCodeOrdinal),
                 reader.IsDBNull(stepNameOrdinal) ? string.Empty : reader.GetString(stepNameOrdinal),
-                reader.IsDBNull(pageNameOrdinal) ? null : reader.GetString(pageNameOrdinal)));
+                reader.IsDBNull(pageNameOrdinal) ? null : reader.GetString(pageNameOrdinal),
+                reader.IsDBNull(microFrontendNameOrdinal) ? null : reader.GetString(microFrontendNameOrdinal),
+                reader.IsDBNull(formNameOrdinal) ? null : reader.GetString(formNameOrdinal)));
         }
 
         return rows;
     }
 
-    private static MigrationProgressTrackerViewModel BuildDashboard(List<LegacyInventoryRow> legacyRows, List<DevOpsStoryItem> stories)
+    private static MigrationProgressTrackerViewModel BuildDashboard(
+        List<LegacyInventoryRow> legacyRows,
+        List<DevOpsStoryItem> stories,
+        List<DevOpsStoryItem>? orchestratorStories = null)
     {
         var storyMatches = stories
             .GroupBy(s => NormalizeKey(s.Title))
             .ToDictionary(g => g.Key, g => g.OrderBy(s => s.Id).First(), StringComparer.OrdinalIgnoreCase);
 
+        var legacyStepNames = legacyRows
+            .Select(row => NormalizeKey(row.StepName))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var legacyRowsByStepName = legacyRows
+            .GroupBy(row => NormalizeKey(row.StepName), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var diagnostics = legacyRows.Select(row =>
+        {
+            storyMatches.TryGetValue(NormalizeKey(row.StepName), out var story);
+            return BuildExclusionDiagnostic(
+                row,
+                story,
+                legacyRowsByStepName.TryGetValue(NormalizeKey(row.StepName), out var relatedRows) ? relatedRows : [row]);
+        })
+        .Where(diagnostic => diagnostic is not null)
+        .Cast<MigrationProgressExclusionDiagnostic>()
+        .Concat(BuildUnmatchedStoryDiagnostics(orchestratorStories ?? stories, legacyRowsByStepName))
+        .OrderBy(diagnostic => StepTypeSortKey(diagnostic.StepType))
+        .ThenBy(diagnostic => diagnostic.ProcessCode)
+        .ThenBy(diagnostic => diagnostic.StepCode)
+        .ThenBy(diagnostic => diagnostic.MatchedStoryTitle)
+        .ToList();
+
         var overviewSourceItems = legacyRows.Select(row =>
         {
             storyMatches.TryGetValue(NormalizeKey(row.StepName), out var story);
+            var isCompleted = story is not null && !string.IsNullOrWhiteSpace(row.PageName);
             return new MigrationProgressOverviewSourceItem(
                 row.StepType,
                 row.ProcessCode,
-                story?.OrchestratorPhaseUpdated);
+                isCompleted ? story?.OrchestratorPhaseUpdated : null);
         }).ToList();
 
         var items = legacyRows.Select(row =>
@@ -158,6 +207,7 @@ WHERE PROCESS_CODE NOT IN
             GetPercentage(totalCompleted, totalLegacy),
             ExcludedProcessCodes.OrderBy(code => code).ToList(),
             overview,
+            diagnostics,
             stepTypeSummaries,
             processSummaries);
     }
@@ -194,6 +244,169 @@ WHERE PROCESS_CODE NOT IN
     private static decimal GetPercentage(int completed, int total) =>
         total <= 0 ? 0 : Math.Round((decimal)completed * 100m / total, 1);
 
-    internal static MigrationProgressTrackerViewModel BuildDashboardForTests(List<LegacyInventoryRow> legacyRows, List<DevOpsStoryItem> stories) =>
-        BuildDashboard(legacyRows, stories);
+    private static MigrationProgressExclusionDiagnostic? BuildExclusionDiagnostic(
+        LegacyInventoryRow row,
+        DevOpsStoryItem? story,
+        IReadOnlyCollection<LegacyInventoryRow> sameNameRows)
+    {
+        var matchDetail = BuildMatchDetail(row, sameNameRows);
+
+        if (story is null)
+        {
+            return new MigrationProgressExclusionDiagnostic(
+                null,
+                row.StepType,
+                row.ProcessCode,
+                row.StepCode,
+                row.StepName,
+                row.PageName,
+                row.MicroFrontendName,
+                row.FormName,
+                null,
+                null,
+                null,
+                null,
+                MissingStoryReason,
+                matchDetail);
+        }
+
+        if (string.IsNullOrWhiteSpace(row.PageName))
+        {
+            return new MigrationProgressExclusionDiagnostic(
+                story.Id,
+                row.StepType,
+                row.ProcessCode,
+                row.StepCode,
+                row.StepName,
+                row.PageName,
+                row.MicroFrontendName,
+                row.FormName,
+                story.Title,
+                story.WorkItemUrl,
+                story.State,
+                story.OrchestratorPhaseUpdated,
+                MissingPageReason,
+                matchDetail);
+        }
+
+        if (story.OrchestratorPhaseUpdated is null)
+        {
+            return new MigrationProgressExclusionDiagnostic(
+                story.Id,
+                row.StepType,
+                row.ProcessCode,
+                row.StepCode,
+                row.StepName,
+                row.PageName,
+                row.MicroFrontendName,
+                row.FormName,
+                story.Title,
+                story.WorkItemUrl,
+                story.State,
+                null,
+                MissingPhaseUpdatedReason,
+                matchDetail);
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<MigrationProgressExclusionDiagnostic> BuildUnmatchedStoryDiagnostics(
+        IEnumerable<DevOpsStoryItem> orchestratorStories,
+        IReadOnlyDictionary<string, List<LegacyInventoryRow>> legacyRowsByStepName)
+    {
+        var legacyStepNames = legacyRowsByStepName.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var story in orchestratorStories
+                     .GroupBy(story => NormalizeKey(story.Title))
+                     .Select(group => group.OrderBy(story => story.Id).First())
+                     .OrderBy(story => story.Title, StringComparer.OrdinalIgnoreCase))
+        {
+            var normalizedTitle = NormalizeKey(story.Title);
+            if (string.IsNullOrWhiteSpace(normalizedTitle) || legacyStepNames.Contains(normalizedTitle))
+            {
+                continue;
+            }
+
+            var singularPluralCandidates = legacyRowsByStepName
+                .Where(pair => NormalizeLooseKey(pair.Key) == NormalizeLooseKey(normalizedTitle))
+                .SelectMany(pair => pair.Value)
+                .ToList();
+
+            yield return new MigrationProgressExclusionDiagnostic(
+                story.Id,
+                "-",
+                "-",
+                "-",
+                story.Title,
+                null,
+                null,
+                null,
+                story.Title,
+                story.WorkItemUrl,
+                story.State,
+                story.OrchestratorPhaseUpdated,
+                MissingLegacyStepReason,
+                singularPluralCandidates.Count == 0
+                    ? null
+                    : $"No exact STEP_NAME match. Similar legacy names: {string.Join("; ", singularPluralCandidates.Select(FormatLegacyRowRef))}");
+        }
+    }
+
+    private static string? BuildMatchDetail(LegacyInventoryRow row, IReadOnlyCollection<LegacyInventoryRow> sameNameRows)
+    {
+        if (sameNameRows.Count <= 1)
+        {
+            return null;
+        }
+
+        var alternatives = sameNameRows
+            .Where(candidate =>
+                !string.Equals(candidate.ProcessCode, row.ProcessCode, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(candidate.StepCode, row.StepCode, StringComparison.OrdinalIgnoreCase))
+            .Select(FormatLegacyRowRef)
+            .ToList();
+
+        if (alternatives.Count == 0)
+        {
+            return null;
+        }
+
+        return $"Title-only match. The same STEP_NAME also exists in: {string.Join("; ", alternatives)}";
+    }
+
+    private static string FormatLegacyRowRef(LegacyInventoryRow row)
+    {
+        var mfe = string.IsNullOrWhiteSpace(row.MicroFrontendName) ? "No MFE" : row.MicroFrontendName;
+        var form = string.IsNullOrWhiteSpace(row.FormName) ? "No Form" : row.FormName;
+        return $"{row.StepType}/{row.ProcessCode}/{row.StepCode} ({mfe}, {form})";
+    }
+
+    private static string NormalizeLooseKey(string value)
+    {
+        var normalized = NormalizeKey(value);
+        if (normalized.EndsWith("IES", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized[..^3] + "Y";
+        }
+
+        return normalized.EndsWith("S", StringComparison.OrdinalIgnoreCase) && normalized.Length > 1
+            ? normalized[..^1]
+            : normalized;
+    }
+
+    private static int StepTypeSortKey(string stepType)
+    {
+        var index = Array.FindIndex(
+            StepTypeOrder,
+            ordered => string.Equals(ordered, stepType, StringComparison.OrdinalIgnoreCase));
+
+        return index >= 0 ? index : int.MaxValue;
+    }
+
+    internal static MigrationProgressTrackerViewModel BuildDashboardForTests(
+        List<LegacyInventoryRow> legacyRows,
+        List<DevOpsStoryItem> stories,
+        List<DevOpsStoryItem>? orchestratorStories = null) =>
+        BuildDashboard(legacyRows, stories, orchestratorStories);
 }

@@ -99,36 +99,56 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             return activePullRequestsByStory;
         }
 
-        var storyPullRequests = new Dictionary<int, HashSet<PullRequestArtifactRef>>();
+        var storyPullRequests = uniqueStoryIds.ToDictionary(
+            storyId => storyId,
+            _ => new HashSet<PullRequestArtifactRef>());
 
-        foreach (var storyId in uniqueStoryIds)
+        var baseUrl = $"https://dev.azure.com/{organization}/{project}/_apis/wit";
+        const int workItemBatchSize = 100;
+
+        foreach (var batch in uniqueStoryIds.Chunk(workItemBatchSize))
         {
             try
             {
-                var workItem = await GetWorkItemWithRelationsAsync(organization, project, patToken, storyId, cancellationToken);
-                var pullRequests = ExtractPullRequestRelations(workItem.Relations);
-                storyPullRequests[storyId] = pullRequests;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"GetActivePullRequestCountsByStoryAsync: Failed to load relations for story {storyId}: {ex.Message}");
-                storyPullRequests[storyId] = new HashSet<PullRequestArtifactRef>();
-            }
-        }
+                var workItems = await GetWorkItemsBatchAsync(baseUrl, patToken, batch, includeRelations: true, cancellationToken);
 
-        var activePullRequests = new HashSet<PullRequestArtifactRef>();
-        foreach (var pullRequest in storyPullRequests.Values.SelectMany(prs => prs).Distinct())
-        {
-            try
-            {
-                if (await IsPullRequestActiveAsync(organization, project, patToken, pullRequest, cancellationToken))
+                foreach (var workItem in workItems)
                 {
-                    activePullRequests.Add(pullRequest);
+                    storyPullRequests[workItem.Id] = ExtractPullRequestRelations(workItem.Relations);
                 }
             }
             catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"GetActivePullRequestCountsByStoryAsync: Failed to load relations for story batch {string.Join(",", batch)}: {ex.Message}");
+            }
+        }
+
+        var distinctPullRequests = storyPullRequests.Values
+            .SelectMany(prs => prs)
+            .Distinct()
+            .ToList();
+
+        var activePullRequests = new HashSet<PullRequestArtifactRef>();
+        var activePullRequestChecks = distinctPullRequests.Select(async pullRequest =>
+        {
+            try
+            {
+                return await IsPullRequestActiveAsync(organization, project, patToken, pullRequest, cancellationToken)
+                    ? pullRequest
+                    : (PullRequestArtifactRef?)null;
+            }
+            catch (Exception ex)
+            {
                 System.Diagnostics.Debug.WriteLine($"GetActivePullRequestCountsByStoryAsync: Failed to load PR {pullRequest.RepositoryId}/{pullRequest.PullRequestId}: {ex.Message}");
+                return null;
+            }
+        });
+
+        foreach (var activePullRequest in await Task.WhenAll(activePullRequestChecks))
+        {
+            if (activePullRequest is { } pullRequest)
+            {
+                activePullRequests.Add(pullRequest);
             }
         }
 
@@ -383,25 +403,6 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
 
         var workItemsData = await workItemsResponse.Content.ReadFromJsonAsync<WorkItemsResponse>(JsonOptions, cancellationToken);
         return workItemsData?.Value is { Count: > 0 } ? workItemsData.Value : new List<WorkItemDto>();
-    }
-
-    private async Task<WorkItemDto> GetWorkItemWithRelationsAsync(
-        string organization,
-        string project,
-        string patToken,
-        int storyId,
-        CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"https://dev.azure.com/{organization}/{project}/_apis/wit/workItems/{storyId}?$expand=relations&api-version=7.1");
-        ApplyPatHeader(request, patToken);
-
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var workItem = await response.Content.ReadFromJsonAsync<WorkItemDto>(JsonOptions, cancellationToken);
-        return workItem ?? new WorkItemDto();
     }
 
     private async Task<bool> IsPullRequestActiveAsync(

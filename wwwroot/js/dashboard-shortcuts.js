@@ -28,3 +28,23 @@ export function setEditModeConnectionState(isActive) {
 
     window.sessionStorage.removeItem(editModeStorageKey);
 }
+
+export function registerDiagnosticsShortcut(dotNetReference) {
+    const handler = async (event) => {
+        if (!event.ctrlKey || !event.shiftKey || event.key?.toLowerCase() !== "d") {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        await dotNetReference.invokeMethodAsync("HandleDiagnosticsShortcut");
+    };
+
+    window.addEventListener("keydown", handler, true);
+
+    return {
+        dispose() {
+            window.removeEventListener("keydown", handler, true);
+        }
+    };
+}

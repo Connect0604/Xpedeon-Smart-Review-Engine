@@ -2,11 +2,13 @@
 @implements IAsyncDisposable
 
 @using DevExpress.Blazor
+@using Microsoft.JSInterop
 @using SmartReviewSystem.Models
 @using SmartReviewSystem.Services.MigrationProgressTracker
 
 @inject IMigrationProgressTrackerService TrackerService
 @inject ILogger<MigrationProgressTracker> Logger
+@inject IJSRuntime JS
 
 <PageTitle>Migration Progress Tracker</PageTitle>
 
@@ -65,6 +67,10 @@
                 <button type="button" class="migration-tracker-tab @(ActiveTab == ViewTab.Overview ? "is-active" : string.Empty)" @onclick="() => SetTab(ViewTab.Overview)">Overview</button>
                 <button type="button" class="migration-tracker-tab @(ActiveTab == ViewTab.ByStepType ? "is-active" : string.Empty)" @onclick="() => SetTab(ViewTab.ByStepType)">By Step Type</button>
                 <button type="button" class="migration-tracker-tab @(ActiveTab == ViewTab.ByProcessCode ? "is-active" : string.Empty)" @onclick="() => SetTab(ViewTab.ByProcessCode)">By Process Code</button>
+                @if (IsDiagnosticsVisible)
+                {
+                    <button type="button" class="migration-tracker-tab @(ActiveTab == ViewTab.Diagnostics ? "is-active" : string.Empty)" @onclick="() => SetTab(ViewTab.Diagnostics)">Diagnostics</button>
+                }
             </nav>
 
             @if (ActiveTab == ViewTab.ByStepType)
@@ -123,7 +129,6 @@
                             </div>
                         </div>
                     </section>
-
                     <section class="migration-tracker-overview-donut-grid">
                         @if (CanRenderCharts && OverviewStepTypeCharts.Count > 0)
                         {
@@ -140,7 +145,7 @@
                                     @if (donutData.Count > 0)
                                     {
                                         <DxPieChart T="MigrationProgressChartDatum"
-                                                    @key="@($"step-type-donut-{ChartRenderVersion}-{summary.StepType}")"
+                                                    @key="@($"step-type-donut-{OverviewChartRenderVersion}-{summary.StepType}")"
                                                     Data="@donutData"
                                                     CssClass="migration-tracker-chart migration-tracker-chart--donut"
                                                     InnerDiameter="0.64"
@@ -191,8 +196,21 @@
                                 </div>
                                 <div class="migration-tracker-trend-controls">
                                     <div class="migration-tracker-series-key" aria-label="Chart series">
-                                        <span class="migration-tracker-series-key__swatch" aria-hidden="true"></span>
-                                        <span>Completed</span>
+                                        @foreach (var legendItem in CompletionTrendLegendItems)
+                                        {
+                                            <span class="migration-tracker-series-key__swatch" aria-hidden="true" style="background:@legendItem.Color"></span>
+                                            <span>@legendItem.Label</span>
+                                        }
+                                    </div>
+                                    <div class="migration-tracker-chart-mode-toggle" role="tablist" aria-label="Completion trend mode">
+                                        @foreach (var mode in CompletionTrendModes)
+                                        {
+                                            <button type="button"
+                                                    class="migration-tracker-chart-mode-toggle__button @(SelectedTrendChartMode == mode.Mode ? "is-active" : string.Empty)"
+                                                    @onclick="() => SelectTrendChartMode(mode.Mode)">
+                                                @mode.Label
+                                            </button>
+                                        }
                                     </div>
                                     <div class="migration-tracker-trend-switcher" role="tablist" aria-label="Completion trend granularity">
                                         @foreach (var trend in AvailableCompletionTrends)
@@ -209,10 +227,10 @@
                             @if (CanRenderCharts && SelectedCompletionTrend.Count > 0)
                             {
                                 <DxChart T="MigrationProgressTrendPoint"
-                                         @key="@($"completion-trend-{ChartRenderVersion}-{SelectedTrendGranularity}")"
+                                         @key="@($"completion-trend-{CompletionTrendChartRenderVersion}-{SelectedTrendGranularity}-{SelectedTrendChartMode}")"
                                          Data="@SelectedCompletionTrend"
                                          CssClass="migration-tracker-chart"
-                                         Palette="@TrendChartPalette">
+                                         Palette="@SelectedTrendChartPalette">
                                     <DxChartTitle Text="Completion Trend" />
                                     <DxChartLegend Visible="false" />
                                     <DxChartTooltip Enabled="true"
@@ -223,12 +241,36 @@
                                             </div>
                                         </ChildContent>
                                     </DxChartTooltip>
-                                    <DxChartLineSeries T="MigrationProgressTrendPoint"
-                                                       TArgument="string"
-                                                       TValue="int"
-                                                       Name="Completed"
-                                                       ArgumentField="@((MigrationProgressTrendPoint point) => point.BucketLabel)"
-                                                       ValueField="@((MigrationProgressTrendPoint point) => point.CompletedCount)" />
+                                    @if (SelectedTrendChartMode == CompletionTrendChartMode.All)
+                                    {
+                                        <DxChartLineSeries T="MigrationProgressTrendPoint"
+                                                           TArgument="string"
+                                                           TValue="int"
+                                                           ArgumentField="@((MigrationProgressTrendPoint point) => point.BucketLabel)"
+                                                           Name="Completed"
+                                                           ValueField="@((MigrationProgressTrendPoint point) => point.CompletedCount)" />
+                                    }
+                                    else
+                                    {
+                                        <DxChartLineSeries T="MigrationProgressTrendPoint"
+                                                           TArgument="string"
+                                                           TValue="int"
+                                                           Name="Masters"
+                                                           ArgumentField="@((MigrationProgressTrendPoint point) => point.BucketLabel)"
+                                                           ValueField="@((MigrationProgressTrendPoint point) => point.MastersCompletedCount)" />
+                                        <DxChartLineSeries T="MigrationProgressTrendPoint"
+                                                           TArgument="string"
+                                                           TValue="int"
+                                                           Name="Documents"
+                                                           ArgumentField="@((MigrationProgressTrendPoint point) => point.BucketLabel)"
+                                                           ValueField="@((MigrationProgressTrendPoint point) => point.DocumentsCompletedCount)" />
+                                        <DxChartLineSeries T="MigrationProgressTrendPoint"
+                                                           TArgument="string"
+                                                           TValue="int"
+                                                           Name="Reports"
+                                                           ArgumentField="@((MigrationProgressTrendPoint point) => point.BucketLabel)"
+                                                           ValueField="@((MigrationProgressTrendPoint point) => point.ReportsCompletedCount)" />
+                                    }
                                 </DxChart>
                             }
                             else
@@ -294,7 +336,7 @@
                                 @if (CanRenderCharts && PendingProcessRanking.Count > 0)
                                 {
                                     <DxChart T="MigrationProgressChartDatum"
-                                             @key="@($"pending-process-chart-{ChartRenderVersion}")"
+                                             @key="@($"pending-process-chart-{OverviewChartRenderVersion}")"
                                              Data="@PendingProcessRanking"
                                              CssClass="migration-tracker-chart"
                                              Palette="@BacklogChartPalette">
@@ -405,7 +447,7 @@
                         </section>
                     }
                 }
-                else
+                else if (ActiveTab == ViewTab.ByProcessCode)
                 {
                     <section class="migration-tracker-process-grid">
                         @foreach (var process in ProcessSummariesOrdered)
@@ -496,6 +538,136 @@
                         }
                     </section>
                 }
+                else if (IsDiagnosticsVisible)
+                {
+                    <section class="migration-tracker-overview-grid">
+                        <article class="migration-tracker-visual-card migration-tracker-visual-card--wide">
+                            <div class="migration-tracker-visual-card__header">
+                                <div>
+                                    <p class="migration-tracker-section-label">Cross-check diagnostics</p>
+                                    <h3>Forms not counted by the progress tracker</h3>
+                                </div>
+                            </div>
+                            <div class="migration-tracker-diagnostics-filters">
+                                <label class="migration-tracker-searchbar migration-tracker-diagnostics-filters__search">
+                                    <span class="migration-tracker-searchbar__icon" aria-hidden="true"></span>
+                                    <input class="migration-tracker-searchbar__input"
+                                           aria-label="Search diagnostics"
+                                           @bind="DiagnosticsSearchText"
+                                           @bind:event="oninput"
+                                           placeholder="Search form, process, story, page" />
+                                    @if (!string.IsNullOrWhiteSpace(DiagnosticsSearchText))
+                                    {
+                                        <button type="button"
+                                                class="migration-tracker-searchbar__clear"
+                                                aria-label="Clear diagnostics search"
+                                                title="Clear diagnostics search"
+                                                @onclick="ClearDiagnosticsSearch">
+                                            Ã—
+                                        </button>
+                                    }
+                                </label>
+                                <label class="migration-tracker-diagnostics-filter">
+                                    <span>Reason</span>
+                                    <select @bind="SelectedDiagnosticsReason">
+                                        @foreach (var option in DiagnosticsReasonOptions)
+                                        {
+                                            <option value="@option">@option</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label class="migration-tracker-diagnostics-filter">
+                                    <span>Step Type</span>
+                                    <select @bind="SelectedDiagnosticsStepType">
+                                        @foreach (var option in DiagnosticsStepTypeOptions)
+                                        {
+                                            <option value="@option">@option</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label class="migration-tracker-diagnostics-filter">
+                                    <span>Phase Updated</span>
+                                    <select @bind="SelectedDiagnosticsPhaseUpdated">
+                                        @foreach (var option in DiagnosticsPhaseUpdatedOptions)
+                                        {
+                                            <option value="@option">@option</option>
+                                        }
+                                    </select>
+                                </label>
+                            </div>
+                            @if (FilteredExclusionDiagnostics.Count > 0)
+                            {
+                                <p class="migration-tracker-diagnostics-summary">
+                                    @FilteredExclusionDiagnostics.Count item(s) match the current diagnostics filters.
+                                </p>
+                                <div class="migration-tracker-diagnostics-table">
+                                    <div class="migration-tracker-diagnostics-table__head">
+                                        <span>Step</span>
+                                        <span>Form</span>
+                                        <span>Page</span>
+                                        <span>Story</span>
+                                        <span>Phase Updated</span>
+                                        <span>Reason</span>
+                                        <span>Match Detail</span>
+                                    </div>
+                                    @foreach (var diagnostic in FilteredExclusionDiagnostics)
+                                    {
+                                        <div class="migration-tracker-diagnostics-table__row">
+                                            <span class="migration-tracker-diagnostics-table__cell" data-label="Step">
+                                                @diagnostic.StepType / @diagnostic.ProcessCode / @diagnostic.StepCode
+                                                @if (!string.IsNullOrWhiteSpace(diagnostic.MicroFrontendName) || !string.IsNullOrWhiteSpace(diagnostic.FormName))
+                                                {
+                                                    <small class="migration-tracker-diagnostics-table__meta">
+                                                        @($"{diagnostic.MicroFrontendName ?? "No MFE"} / {diagnostic.FormName ?? "No Form"}")
+                                                    </small>
+                                                }
+                                            </span>
+                                            <span class="migration-tracker-diagnostics-table__cell" data-label="Form">@diagnostic.StepName</span>
+                                            <span class="migration-tracker-diagnostics-table__cell" data-label="Page">@(string.IsNullOrWhiteSpace(diagnostic.PageName) ? "-" : diagnostic.PageName)</span>
+                                            <span class="migration-tracker-diagnostics-table__cell" data-label="Story">
+                                                @if (!string.IsNullOrWhiteSpace(diagnostic.MatchedStoryTitle))
+                                                {
+                                                    <a href="@diagnostic.MatchedStoryUrl" target="_blank" rel="noopener noreferrer">
+                                                        @diagnostic.MatchedStoryTitle
+                                                    </a>
+                                                    @if (diagnostic.StoryId is not null)
+                                                    {
+                                                        <small class="migration-tracker-diagnostics-table__meta">ID: @diagnostic.StoryId</small>
+                                                    }
+                                                    @if (!string.IsNullOrWhiteSpace(diagnostic.StoryState))
+                                                    {
+                                                        <small class="migration-tracker-diagnostics-table__meta">State: @diagnostic.StoryState</small>
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    <span>-</span>
+                                                }
+                                            </span>
+                                            <span class="migration-tracker-diagnostics-table__cell" data-label="Phase Updated">
+                                                @(diagnostic.OrchestratorPhaseUpdated?.ToString("dd MMM yyyy HH:mm") ?? "-")
+                                            </span>
+                                            <span class="migration-tracker-diagnostics-table__cell" data-label="Reason">
+                                                <span class="migration-tracker-diagnostics-reason">@diagnostic.Reason</span>
+                                            </span>
+                                            <span class="migration-tracker-diagnostics-table__cell" data-label="Match Detail">
+                                                @(string.IsNullOrWhiteSpace(diagnostic.MatchDetail) ? "-" : diagnostic.MatchDetail)
+                                            </span>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            else if (Dashboard.ExclusionDiagnostics.Count > 0)
+                            {
+                                <p class="migration-tracker-empty">No diagnostics match the current filters.</p>
+                            }
+                            else
+                            {
+                                <p class="migration-tracker-empty">All matched forms are currently being counted by the tracker.</p>
+                            }
+                        </article>
+                    </section>
+                }
             </div>
         </div>
     }
@@ -506,7 +678,14 @@
     {
         Overview,
         ByStepType,
-        ByProcessCode
+        ByProcessCode,
+        Diagnostics
+    }
+
+    private enum CompletionTrendChartMode
+    {
+        All,
+        ByStepType
     }
 
     private static readonly string[] StepTypeOrder = ["M", "D", "R"];
@@ -514,15 +693,25 @@
     private MigrationProgressTrackerViewModel? Dashboard;
     private ViewTab ActiveTab = ViewTab.Overview;
     private string SelectedStepType = "D";
+    private CompletionTrendChartMode SelectedTrendChartMode = CompletionTrendChartMode.All;
     private MigrationProgressTrendGranularity SelectedTrendGranularity = MigrationProgressTrendGranularity.Weekly;
     private string SearchText = string.Empty;
+    private string DiagnosticsSearchText = string.Empty;
+    private string SelectedDiagnosticsReason = "All Reasons";
+    private string SelectedDiagnosticsStepType = "All Step Types";
+    private string SelectedDiagnosticsPhaseUpdated = "All";
+    private bool IsDiagnosticsVisible;
     private readonly HashSet<string> ExpandedProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> ExpandedStepTypeProcesses = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> ExpandedProcessStepTypes = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource _loadCts = new();
+    private IJSObjectReference? _shortcutModule;
+    private IJSObjectReference? _shortcutRegistration;
+    private DotNetObjectReference<MigrationProgressTracker>? _selfReference;
     private bool _chartsActivated;
     private bool _isDisposed;
-    private int ChartRenderVersion;
+    private int OverviewChartRenderVersion;
+    private int CompletionTrendChartRenderVersion;
     private bool IsLoading = true;
     private string ErrorMessage = string.Empty;
 
@@ -544,11 +733,41 @@
     private IReadOnlyList<MigrationProgressChartDatum> PendingProcessRanking =>
         Dashboard?.Overview.PendingProcessRanking ?? [];
 
+    private IReadOnlyList<MigrationProgressExclusionDiagnostic> ExclusionDiagnostics =>
+        Dashboard?.ExclusionDiagnostics ?? [];
+
+    private IReadOnlyList<string> DiagnosticsReasonOptions =>
+        ["All Reasons", .. ExclusionDiagnostics.Select(d => d.Reason).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(reason => reason)];
+
+    private IReadOnlyList<string> DiagnosticsStepTypeOptions =>
+        ["All Step Types", .. ExclusionDiagnostics.Select(d => StepTypeLabel(d.StepType)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(label => label)];
+
+    private static IReadOnlyList<string> DiagnosticsPhaseUpdatedOptions =>
+        ["All", "Has Phase Updated", "Missing Phase Updated"];
+
+    private List<MigrationProgressExclusionDiagnostic> FilteredExclusionDiagnostics =>
+        ExclusionDiagnostics.Where(MatchesDiagnosticsFilters).ToList();
+
     private List<MigrationProgressTrendPoint> SelectedCompletionTrend =>
         AvailableCompletionTrends
             .FirstOrDefault(trend => trend.Granularity == SelectedTrendGranularity)
             ?.Points
         ?? [];
+
+    private static IReadOnlyList<CompletionTrendModeOption> CompletionTrendModes =>
+        [
+            new(CompletionTrendChartMode.All, "All"),
+            new(CompletionTrendChartMode.ByStepType, "By Step Type")
+        ];
+
+    private IReadOnlyList<CompletionTrendLegendItem> CompletionTrendLegendItems =>
+        SelectedTrendChartMode == CompletionTrendChartMode.All
+            ? [new("Completed", TrendChartPalette[0])]
+            : [
+                new("Masters", MastersOverviewPalette[0]),
+                new("Documents", DocumentsOverviewPalette[0]),
+                new("Reports", ReportsOverviewPalette[0])
+            ];
 
     private bool CanRenderCharts =>
         !_isDisposed &&
@@ -562,6 +781,11 @@
     private static readonly string[] DocumentsOverviewPalette = ["#5C84B4", "#D9E8F7"];
     private static readonly string[] BacklogChartPalette = ["#8661B2", "#D9C9EA"];
 
+    private string[] SelectedTrendChartPalette =>
+        SelectedTrendChartMode == CompletionTrendChartMode.All
+            ? [TrendChartPalette[0]]
+            : [MastersOverviewPalette[0], DocumentsOverviewPalette[0], ReportsOverviewPalette[0]];
+
     private int FilteredItemCount =>
         Dashboard is null ? 0 : GetAllItems().Count;
 
@@ -572,6 +796,13 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            _shortcutModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/dashboard-shortcuts.js");
+            _selfReference = DotNetObjectReference.Create(this);
+            _shortcutRegistration = await _shortcutModule.InvokeAsync<IJSObjectReference>("registerDiagnosticsShortcut", _selfReference);
+        }
+
         if (_chartsActivated || _isDisposed || IsLoading || Dashboard is null)
         {
             return;
@@ -604,7 +835,8 @@
             Dashboard = NormalizeDashboard(dashboard);
             SelectedStepType = Dashboard.StepTypeSummaries.FirstOrDefault()?.StepType ?? "D";
             SelectedTrendGranularity = Dashboard.Overview.DefaultTrendGranularity;
-            ChartRenderVersion++;
+            OverviewChartRenderVersion++;
+            CompletionTrendChartRenderVersion++;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _isDisposed)
         {
@@ -627,12 +859,30 @@
 
     private void SetTab(ViewTab tab)
     {
+        if (tab == ViewTab.Diagnostics && !IsDiagnosticsVisible)
+        {
+            ActiveTab = ViewTab.Overview;
+            return;
+        }
+
         ActiveTab = tab;
     }
 
-    private void SelectTrendGranularity(MigrationProgressTrendGranularity granularity) => SelectedTrendGranularity = granularity;
+    private void SelectTrendGranularity(MigrationProgressTrendGranularity granularity)
+    {
+        SelectedTrendGranularity = granularity;
+        CompletionTrendChartRenderVersion++;
+    }
+
+    private void SelectTrendChartMode(CompletionTrendChartMode mode)
+    {
+        SelectedTrendChartMode = mode;
+        CompletionTrendChartRenderVersion++;
+    }
 
     private void ClearSearch() => SearchText = string.Empty;
+
+    private void ClearDiagnosticsSearch() => DiagnosticsSearchText = string.Empty;
 
     private void FocusStepType(string stepType)
     {
@@ -753,6 +1003,49 @@
     private static bool Contains(string? value, string term) =>
         !string.IsNullOrWhiteSpace(value) && value.Contains(term, StringComparison.OrdinalIgnoreCase);
 
+    private bool MatchesDiagnosticsFilters(MigrationProgressExclusionDiagnostic diagnostic)
+    {
+        if (!string.Equals(SelectedDiagnosticsReason, "All Reasons", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(diagnostic.Reason, SelectedDiagnosticsReason, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!string.Equals(SelectedDiagnosticsStepType, "All Step Types", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(StepTypeLabel(diagnostic.StepType), SelectedDiagnosticsStepType, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(SelectedDiagnosticsPhaseUpdated, "Has Phase Updated", StringComparison.OrdinalIgnoreCase) &&
+            diagnostic.OrchestratorPhaseUpdated is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(SelectedDiagnosticsPhaseUpdated, "Missing Phase Updated", StringComparison.OrdinalIgnoreCase) &&
+            diagnostic.OrchestratorPhaseUpdated is not null)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(DiagnosticsSearchText))
+        {
+            return true;
+        }
+
+        var term = DiagnosticsSearchText.Trim();
+        return Contains(diagnostic.StepType, term)
+            || (diagnostic.StoryId?.ToString().Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || Contains(diagnostic.ProcessCode, term)
+            || Contains(diagnostic.StepCode, term)
+            || Contains(diagnostic.StepName, term)
+            || Contains(diagnostic.PageName, term)
+            || Contains(diagnostic.MatchedStoryTitle, term)
+            || Contains(diagnostic.StoryState, term)
+            || Contains(diagnostic.Reason, term);
+    }
+
     private static List<MigrationProgressChartDatum> BuildOverviewStepTypeStatusBreakdown(MigrationProgressOverviewStepTypeTile summary) =>
         [
             ..BuildStatusBreakdownPoint("Completed", summary.Completed),
@@ -786,6 +1079,7 @@
         {
             ExcludedProcessCodes = dashboard.ExcludedProcessCodes ?? [],
             Overview = overview,
+            ExclusionDiagnostics = dashboard.ExclusionDiagnostics ?? [],
             StepTypeSummaries = dashboard.StepTypeSummaries ?? [],
             ProcessSummaries = dashboard.ProcessSummaries ?? []
         };
@@ -820,12 +1114,47 @@
         _ => TrendChartPalette[1]
     };
 
-    public ValueTask DisposeAsync()
+    private sealed record CompletionTrendModeOption(CompletionTrendChartMode Mode, string Label);
+
+    private sealed record CompletionTrendLegendItem(string Label, string Color);
+
+    [JSInvokable]
+    public Task HandleDiagnosticsShortcut()
+    {
+        IsDiagnosticsVisible = true;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
     {
         _isDisposed = true;
         _loadCts.Cancel();
         _loadCts.Dispose();
-        return ValueTask.CompletedTask;
+
+        if (_shortcutRegistration is not null)
+        {
+            try
+            {
+                await _shortcutRegistration.InvokeVoidAsync("dispose");
+                await _shortcutRegistration.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+
+        if (_shortcutModule is not null)
+        {
+            try
+            {
+                await _shortcutModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+
+        _selfReference?.Dispose();
     }
 }
 

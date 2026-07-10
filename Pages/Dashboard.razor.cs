@@ -345,7 +345,9 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
                     ModuleName = moduleName,
                     StoriesCount = storiesByModule.TryGetValue(moduleName, out var count) ? count : 0,
                     ActivePrCount = activePullRequestsByModule.TryGetValue(moduleName, out var activePrs) ? activePrs.Count : 0,
-                    IsAvailable = !activePullRequestsByModule.TryGetValue(moduleName, out var modulePullRequests) || modulePullRequests.Count == 0
+                    IsAvailable =
+                        !(storiesByModule.TryGetValue(moduleName, out var runningStoryCount) && runningStoryCount > 0) &&
+                        !(activePullRequestsByModule.TryGetValue(moduleName, out var modulePullRequests) && modulePullRequests.Count > 0)
                 })
                 .OrderByDescending(m => m.StoriesCount)
                 .ThenBy(m => m.ModuleName)

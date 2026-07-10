@@ -5,7 +5,9 @@ internal sealed record LegacyInventoryRow(
     string ProcessCode,
     string StepCode,
     string StepName,
-    string? PageName);
+    string? PageName,
+    string? MicroFrontendName,
+    string? FormName);
 
 internal sealed record MigrationProgressStoryMatch(
     int StoryId,
@@ -52,6 +54,22 @@ internal sealed record MigrationProgressOverviewSourceItem(
     string ProcessCode,
     DateTimeOffset? CompletedAt);
 
+internal sealed record MigrationProgressExclusionDiagnostic(
+    int? StoryId,
+    string StepType,
+    string ProcessCode,
+    string StepCode,
+    string StepName,
+    string? PageName,
+    string? MicroFrontendName,
+    string? FormName,
+    string? MatchedStoryTitle,
+    string? MatchedStoryUrl,
+    string? StoryState,
+    DateTimeOffset? OrchestratorPhaseUpdated,
+    string Reason,
+    string? MatchDetail);
+
 internal sealed record MigrationProgressOverviewKpi(
     string Key,
     string Label,
@@ -76,7 +94,10 @@ internal sealed record MigrationProgressTrendPoint(
     DateTimeOffset BucketEnd,
     string BucketLabel,
     string TooltipLabel,
-    int CompletedCount);
+    int CompletedCount,
+    int MastersCompletedCount,
+    int DocumentsCompletedCount,
+    int ReportsCompletedCount);
 
 internal sealed record MigrationProgressTrendSeries(
     MigrationProgressTrendGranularity Granularity,
@@ -117,5 +138,6 @@ internal sealed record MigrationProgressTrackerViewModel(
     decimal OverallCompletionPercentage,
     List<string> ExcludedProcessCodes,
     MigrationProgressOverviewViewModel Overview,
+    List<MigrationProgressExclusionDiagnostic> ExclusionDiagnostics,
     List<MigrationProgressStepTypeSummary> StepTypeSummaries,
     List<MigrationProgressProcessSummary> ProcessSummaries);

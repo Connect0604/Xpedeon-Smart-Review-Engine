@@ -166,13 +166,12 @@ internal static class MigrationProgressOverviewBuilder
 
     private static List<MigrationProgressTrendSeries> BuildCompletionTrends(IReadOnlyCollection<MigrationProgressOverviewSourceItem> items)
     {
-        var completedDates = items
+        var completedItems = items
             .Where(item => item.CompletedAt is not null)
-            .Select(item => item.CompletedAt!.Value)
-            .OrderBy(date => date)
+            .OrderBy(item => item.CompletedAt)
             .ToList();
 
-        if (completedDates.Count == 0)
+        if (completedItems.Count == 0)
         {
             return [];
         }
@@ -180,34 +179,34 @@ internal static class MigrationProgressOverviewBuilder
         return new List<MigrationProgressTrendSeries>
         {
             BuildTrendSeries(
-                completedDates,
+                completedItems,
                 MigrationProgressTrendGranularity.Weekly,
                 "Weekly",
-                GetWeekStart,
+                item => GetWeekStart(item.CompletedAt!.Value),
                 start => start.AddDays(6),
                 start => $"{start:dd MMM} - {start.AddDays(6):dd MMM}",
                 start => $"Week of {start:dd MMM} - {start.AddDays(6):dd MMM}"),
             BuildTrendSeries(
-                completedDates,
+                completedItems,
                 MigrationProgressTrendGranularity.Monthly,
                 "Monthly",
-                GetMonthStart,
+                item => GetMonthStart(item.CompletedAt!.Value),
                 start => new DateTimeOffset(start.Year, start.Month, DateTime.DaysInMonth(start.Year, start.Month), 0, 0, 0, TimeSpan.Zero),
                 start => start.ToString("MMM yyyy"),
                 start => start.ToString("MMMM yyyy")),
             BuildTrendSeries(
-                completedDates,
+                completedItems,
                 MigrationProgressTrendGranularity.Quarterly,
                 "Quarterly",
-                GetQuarterStart,
+                item => GetQuarterStart(item.CompletedAt!.Value),
                 start => GetQuarterStart(start).AddMonths(3).AddDays(-1),
                 start => $"Q{GetQuarter(start)} {start:yyyy}",
                 start => $"Quarter {GetQuarter(start)} {start:yyyy}"),
             BuildTrendSeries(
-                completedDates,
+                completedItems,
                 MigrationProgressTrendGranularity.Yearly,
                 "Yearly",
-                GetYearStart,
+                item => GetYearStart(item.CompletedAt!.Value),
                 start => new DateTimeOffset(start.Year, 12, 31, 0, 0, 0, TimeSpan.Zero),
                 start => start.ToString("yyyy"),
                 start => start.ToString("yyyy"))
@@ -215,15 +214,15 @@ internal static class MigrationProgressOverviewBuilder
     }
 
     private static MigrationProgressTrendSeries BuildTrendSeries(
-        IReadOnlyCollection<DateTimeOffset> completedDates,
+        IReadOnlyCollection<MigrationProgressOverviewSourceItem> completedItems,
         MigrationProgressTrendGranularity granularity,
         string label,
-        Func<DateTimeOffset, DateTimeOffset> bucketStartFactory,
+        Func<MigrationProgressOverviewSourceItem, DateTimeOffset> bucketStartFactory,
         Func<DateTimeOffset, DateTimeOffset> bucketEndFactory,
         Func<DateTimeOffset, string> bucketLabelFactory,
         Func<DateTimeOffset, string> tooltipLabelFactory)
     {
-        var points = completedDates
+        var points = completedItems
             .GroupBy(bucketStartFactory)
             .OrderBy(group => group.Key)
             .Select(group =>
@@ -234,7 +233,10 @@ internal static class MigrationProgressOverviewBuilder
                     bucketEndFactory(bucketStart),
                     bucketLabelFactory(bucketStart),
                     tooltipLabelFactory(bucketStart),
-                    group.Count());
+                    group.Count(),
+                    group.Count(item => string.Equals(item.StepType, "M", StringComparison.OrdinalIgnoreCase)),
+                    group.Count(item => string.Equals(item.StepType, "D", StringComparison.OrdinalIgnoreCase)),
+                    group.Count(item => string.Equals(item.StepType, "R", StringComparison.OrdinalIgnoreCase)));
             })
             .ToList();
 
