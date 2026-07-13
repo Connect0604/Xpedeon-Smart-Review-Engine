@@ -7,6 +7,7 @@ internal sealed class DevOpsStoryItem
     public string Title { get; init; } = string.Empty;
     public string State { get; init; } = string.Empty;
     public string AssignedTo { get; init; } = string.Empty;
+    public string TeamMember { get; init; } = string.Empty;
     public string Tags { get; init; } = string.Empty;
     public string OrchestratorPhase { get; init; } = string.Empty;
     public DateTimeOffset? OrchestratorPhaseUpdated { get; set; }

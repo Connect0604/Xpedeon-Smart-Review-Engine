@@ -382,11 +382,12 @@
                     <div class="dashboard-toolbar">
                         <label class="dashboard-toolbar__search dashboard-filter-group">
                             <span class="dashboard-filter-label">Search</span>
-                            <input class="dashboard-filter-input" @bind="SearchText" @bind:event="oninput" placeholder="Story ID, title, assignee, MFE, execution mode, phase" />
+                            <input class="dashboard-filter-input" @bind="SearchText" @bind:event="oninput" placeholder="Story ID, title, assignee, team member, MFE, execution mode, phase" />
                         </label>
                         <label class="dashboard-filter-group">
                             <span class="dashboard-filter-label">State</span>
                             <select class="dashboard-filter-select" @bind="StateFilter">
+                                <option value="@InFlightStateFilter">@InFlightStateFilter</option>
                                 <option value="Any">Any</option>
                                 <option value="New">New</option>
                                 <option value="Active">Active</option>
@@ -451,11 +452,19 @@
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
                                     <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Title)" Caption="Title" MinWidth="200" />
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.AssignedTo)" Caption="Assigned To" MinWidth="120">
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.AssignedTo)" Caption="Assigned To" MinWidth="130">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
                                                 @DisplayOrDash(story.AssignedTo)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.TeamMember)" Caption="Team Member" MinWidth="120">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.TeamMember)
                                             }
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>

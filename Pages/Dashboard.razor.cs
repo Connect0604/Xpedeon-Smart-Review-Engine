@@ -7,6 +7,8 @@ namespace SmartReviewSystem.Pages;
 
 public partial class Dashboard : ComponentBase, IAsyncDisposable
 {
+    private const string InFlightStateFilter = "In Flight";
+
     [Inject]
     private IAzureDevOpsService AzureDevOpsService { get; set; } = default!;
 
@@ -22,7 +24,7 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private string SearchText = string.Empty;
     private string RunningSearchText = string.Empty;
     private string BugSearchText = string.Empty;
-    private string StateFilter = "Any";
+    private string StateFilter = InFlightStateFilter;
     private string OrchestratorFilter = "Coding In Progress";
     private string ActiveTab = "running";
     private string LoadError = string.Empty;

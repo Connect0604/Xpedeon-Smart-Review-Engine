@@ -529,7 +529,7 @@
 
 .dashboard-table-wrap--tracker {
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto;
 }
 
 .dashboard-table-wrap--bugs {

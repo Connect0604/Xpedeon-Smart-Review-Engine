@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using SmartReviewSystem.Models.DevOps;
 
 namespace SmartReviewSystem.Services.DevOps;
@@ -13,6 +14,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
     private const string MfeFieldName = "Custom.Module";
     private const string ExecutionModeFieldName = "Custom.ExecutionMode";
     private const string ClaudeBranchFieldName = "Custom.ClaudeBranch";
+    private const string TeamMemberFieldName = "Custom.TeamMember";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -231,6 +233,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
             var title = item.Fields.TryGetValue("System.Title", out var titleValue) ? titleValue?.ToString() ?? "(No title)" : "(No title)";
             var state = item.Fields.TryGetValue("System.State", out var stateValue) ? stateValue?.ToString() ?? "Unknown" : "Unknown";
             var assigned = item.Fields.TryGetValue("System.AssignedTo", out var assignedValue) ? ExtractAssignedTo(assignedValue) : "Unassigned";
+            var teamMember = item.Fields.TryGetValue(TeamMemberFieldName, out var teamMemberValue) ? ExtractIdentityDisplayValue(teamMemberValue) : string.Empty;
             var tags = item.Fields.TryGetValue("System.Tags", out var tagsValue) ? tagsValue?.ToString() ?? string.Empty : string.Empty;
             var orchestratorPhase = item.Fields.TryGetValue(OrchestratorPhaseFieldName, out var phaseValue) ? phaseValue?.ToString() ?? string.Empty : string.Empty;
             var orchestratorPhaseUpdated = GetFieldDate(item.Fields, OrchestratorPhaseUpdatedFieldName);
@@ -267,6 +270,7 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
                 Title = title,
                 State = state,
                 AssignedTo = assigned,
+                TeamMember = teamMember,
                 Tags = tags,
                 OrchestratorPhase = orchestratorPhase,
                 OrchestratorPhaseUpdated = orchestratorPhaseUpdated ?? revisionMetadata.OrchestratorPhaseUpdated,
@@ -347,6 +351,55 @@ internal sealed class AzureDevOpsService(HttpClient httpClient) : IAzureDevOpsSe
         }
 
         return assignedValue.ToString() ?? "Unassigned";
+    }
+
+    private static string ExtractIdentityDisplayValue(object? identityValue)
+    {
+        if (identityValue is null)
+        {
+            return string.Empty;
+        }
+
+        if (identityValue is JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Object &&
+                element.TryGetProperty("displayName", out var displayName))
+            {
+                return displayName.GetString() ?? string.Empty;
+            }
+
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                return element.GetString() ?? string.Empty;
+            }
+
+            return element.ToString();
+        }
+
+        if (identityValue is string stringValue)
+        {
+            if (string.IsNullOrWhiteSpace(stringValue))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                var jsonNode = JsonNode.Parse(stringValue);
+                var parsedDisplayName = jsonNode?["displayName"]?.GetValue<string>();
+                if (!string.IsNullOrWhiteSpace(parsedDisplayName))
+                {
+                    return parsedDisplayName;
+                }
+            }
+            catch (JsonException)
+            {
+            }
+
+            return stringValue;
+        }
+
+        return identityValue.ToString() ?? string.Empty;
     }
 
     private async Task<Dictionary<int, DevOpsBugItem>> GetWorkItemsByIdAsync(
