@@ -54,15 +54,18 @@ internal sealed class MigrationProgressTrackerService(
     {
         const string sql = """
 SELECT
-    STEP_TYPE,
-    PROCESS_CODE,
-    STEP_CODE,
-    STEP_NAME,
-    PAGE_NAME,
-    MICRO_FRONTEND_NAME,
-    FORM_NAME
-FROM dbo.PC_PROCESS_STEPS_DEFAULT
-WHERE PROCESS_CODE NOT IN
+    steps.STEP_TYPE,
+    steps.PROCESS_CODE,
+    steps.STEP_CODE,
+    steps.STEP_NAME,
+    steps.PAGE_NAME,
+    steps.MICRO_FRONTEND_NAME,
+    steps.FORM_NAME,
+    ISNULL(inventory.PROCESS_NAME, '') AS PROCESS_NAME
+FROM dbo.PC_PROCESS_STEPS_DEFAULT steps
+LEFT JOIN dbo.PC_PROCESS_INVENTORY inventory
+    ON inventory.PROCESS_CODE = steps.PROCESS_CODE
+WHERE steps.PROCESS_CODE NOT IN
 (
     'BI',
     'EINVOICING',
@@ -83,6 +86,7 @@ WHERE PROCESS_CODE NOT IN
         var pageNameOrdinal = reader.GetOrdinal("PAGE_NAME");
         var microFrontendNameOrdinal = reader.GetOrdinal("MICRO_FRONTEND_NAME");
         var formNameOrdinal = reader.GetOrdinal("FORM_NAME");
+        var processNameOrdinal = reader.GetOrdinal("PROCESS_NAME");
 
         while (await reader.ReadAsync(cancellationToken))
         {
@@ -93,7 +97,8 @@ WHERE PROCESS_CODE NOT IN
                 reader.IsDBNull(stepNameOrdinal) ? string.Empty : reader.GetString(stepNameOrdinal),
                 reader.IsDBNull(pageNameOrdinal) ? null : reader.GetString(pageNameOrdinal),
                 reader.IsDBNull(microFrontendNameOrdinal) ? null : reader.GetString(microFrontendNameOrdinal),
-                reader.IsDBNull(formNameOrdinal) ? null : reader.GetString(formNameOrdinal)));
+                reader.IsDBNull(formNameOrdinal) ? null : reader.GetString(formNameOrdinal),
+                reader.IsDBNull(processNameOrdinal) ? string.Empty : reader.GetString(processNameOrdinal)));
         }
 
         return rows;
@@ -151,6 +156,7 @@ WHERE PROCESS_CODE NOT IN
             return new MigrationProgressItem(
                 row.StepType,
                 row.ProcessCode,
+                row.ProcessName,
                 row.StepCode,
                 row.StepName,
                 row.PageName,
@@ -184,6 +190,7 @@ WHERE PROCESS_CODE NOT IN
 
                 return new MigrationProgressProcessSummary(
                     g.Key,
+                    g.Select(i => i.ProcessName).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty,
                     g.Count(),
                     g.Count(i => string.Equals(i.Status, "Completed", StringComparison.OrdinalIgnoreCase)),
                     g.Count(i => string.Equals(i.Status, "Pending", StringComparison.OrdinalIgnoreCase)),

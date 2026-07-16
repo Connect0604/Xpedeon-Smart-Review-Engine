@@ -77,6 +77,12 @@
                                 <option value="All" selected="@(OrchestratorFilter == "All")">All</option>
                             </select>
                         </label>
+                        <button type="button"
+                                class="dashboard-export-btn"
+                                @onclick="ExportRunningStoriesAsync"
+                                disabled="@(RunningStories.Count == 0)">
+                            Export
+                        </button>
                     </div>
 
                     <div class="dashboard-section-toggle-row">
@@ -102,6 +108,7 @@
                         {
                             <div class="dashboard-table-wrap dashboard-table-wrap--running">
                                 <DxGrid Data="RunningStories"
+                                        @ref="_runningStoriesGrid"
                                         ShowAllRows="true"
                                         KeyFieldName="Id"
                                         CssClass="dashboard-dxgrid dashboard-dxgrid--running"
@@ -410,6 +417,12 @@
                                 @(IsLoadingAllImplementationDetails ? "Loading Implementation Details..." : "Load Implementation Details")
                             </button>
                         }
+                        <button type="button"
+                                class="dashboard-export-btn dashboard-export-btn--compact"
+                                @onclick="ExportStoryTrackerAsync"
+                                disabled="@(FilteredStories.Count == 0)">
+                            Export
+                        </button>
                     </div>
 
                     @if (FilteredStories.Count == 0)
@@ -433,6 +446,7 @@
                     {
                         <div class="dashboard-table-wrap dashboard-table-wrap--tracker">
                             <DxGrid Data="FilteredStories"
+                                    @ref="_storyTrackerGrid"
                                     ShowAllRows="true"
                                     KeyFieldName="Id"
                                     CssClass="dashboard-dxgrid"
@@ -561,19 +575,25 @@
                         </label>
                         <button type="button"
                                 class="dashboard-group-toggle-btn"
-                                @onclick="CollapseAllBugGroups">
-                            Collapse All
+                                @onclick="ExpandAllBugGroups">
+                            Expand All
                         </button>
                         <button type="button"
                                 class="dashboard-group-toggle-btn"
-                                @onclick="ExpandAllBugGroups">
-                            Expand All
+                                @onclick="CollapseAllBugGroups">
+                            Collapse All
                         </button>
                         
                         <div class="dashboard-toolbar__meta">
                             <span>Stories With Bugs: <strong>@BugGroups.Count</strong></span>
                             <span>Total Bugs: <strong>@TotalBugCount</strong></span>
                         </div>
+                        <button type="button"
+                                class="dashboard-export-btn"
+                                @onclick="ExportBugTrackerAsync"
+                                disabled="@(FilteredBugTrackerRows.Count == 0)">
+                            Export
+                        </button>
                     </div>
 
                     @if (IsLoadingStories)
@@ -604,6 +624,7 @@
                     {
                         <div class="dashboard-table-wrap dashboard-table-wrap--bugs" @key="_bugGridRenderVersion">
                             <DxGrid Data="FilteredBugTrackerRows"
+                                    @ref="_bugTrackerGrid"
                                     ShowAllRows="true"
                                     KeyFieldName="@nameof(BugTrackerRow.BugId)"
                                     CssClass="dashboard-dxgrid dashboard-dxgrid--bugs"

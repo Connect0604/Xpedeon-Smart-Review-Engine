@@ -547,7 +547,7 @@
 
 .dashboard-toolbar--bugs .dashboard-toolbar__meta {
     order: 4;
-    margin-left: auto;
+    margin-left: 0;
     justify-content: flex-end;
     text-align: right;
 }
@@ -562,6 +562,15 @@
 
 .dashboard-toolbar--bugs .dashboard-group-toggle-btn:nth-of-type(2) {
     order: 3;
+}
+
+.dashboard-toolbar--bugs .dashboard-toolbar__meta {
+    order: 4;
+}
+
+.dashboard-toolbar--bugs .dashboard-export-btn {
+    order: 5;
+    margin-left: auto;
 }
 
 .dashboard-filter-group--bug-search {
@@ -587,6 +596,37 @@
 .dashboard-group-toggle-btn:hover {
     background: var(--dashboard-purple-100);
     border-color: var(--dashboard-purple-800);
+}
+
+.dashboard-export-btn {
+    border: 1px solid var(--dashboard-purple-border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    min-height: 44px;
+    background: #fff;
+    color: var(--dashboard-purple-800);
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.dashboard-export-btn--compact {
+    padding: 9px 14px;
+    min-width: 120px;
+    font-size: 0.86rem;
+}
+
+.dashboard-export-btn:hover:not(:disabled) {
+    background: var(--dashboard-purple-100);
+    border-color: var(--dashboard-purple-800);
+    box-shadow: 0 4px 12px rgba(75, 33, 111, 0.12);
+}
+
+.dashboard-export-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .dashboard-table {

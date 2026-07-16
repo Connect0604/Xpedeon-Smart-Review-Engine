@@ -1343,3 +1343,9 @@
         max-width: min(18rem, 80vw);
     }
 }
+.migration-tracker-accordion__title h3,
+.migration-tracker-process-card__toggle h2,
+.migration-tracker-table__cell--code {
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
