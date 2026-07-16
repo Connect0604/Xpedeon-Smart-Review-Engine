@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Configuration;
+using DevExpress.Blazor;
 using SmartReviewSystem.Models.DevOps;
 using SmartReviewSystem.Services.DevOps;
 
@@ -7,6 +8,8 @@ namespace SmartReviewSystem.Pages;
 
 public partial class Dashboard : ComponentBase, IAsyncDisposable
 {
+    private const string InFlightStateFilter = "In Flight";
+
     [Inject]
     private IAzureDevOpsService AzureDevOpsService { get; set; } = default!;
 
@@ -22,7 +25,7 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private string SearchText = string.Empty;
     private string RunningSearchText = string.Empty;
     private string BugSearchText = string.Empty;
-    private string StateFilter = "Any";
+    private string StateFilter = InFlightStateFilter;
     private string OrchestratorFilter = "Coding In Progress";
     private string ActiveTab = "running";
     private string LoadError = string.Empty;
@@ -34,6 +37,9 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
     private int _bugGridRenderVersion;
     private bool _isRunningStoriesExpanded = true;
     private bool _isMfeFieldsExpanded = false;
+    private IGrid? _runningStoriesGrid;
+    private IGrid? _storyTrackerGrid;
+    private IGrid? _bugTrackerGrid;
     private List<DevOpsStoryItem> Stories = new();
     private List<StoryBugGroup> BugGroups = new();
     private List<BugTrackerRow> BugTrackerRows = new();
@@ -173,6 +179,49 @@ public partial class Dashboard : ComponentBase, IAsyncDisposable
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private async Task ExportRunningStoriesAsync()
+    {
+        if (_runningStoriesGrid is null || RunningStories.Count == 0)
+        {
+            return;
+        }
+
+        await _runningStoriesGrid.ExportToXlsxAsync(
+            $"orchestrators-running-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
+            CreateExportOptions("Orchestrators Running"));
+    }
+
+    private async Task ExportStoryTrackerAsync()
+    {
+        if (_storyTrackerGrid is null || FilteredStories.Count == 0)
+        {
+            return;
+        }
+
+        await _storyTrackerGrid.ExportToXlsxAsync(
+            $"story-tracker-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
+            CreateExportOptions("Story Tracker"));
+    }
+
+    private async Task ExportBugTrackerAsync()
+    {
+        if (_bugTrackerGrid is null || FilteredBugTrackerRows.Count == 0)
+        {
+            return;
+        }
+
+        await _bugTrackerGrid.ExportToXlsxAsync(
+            $"bug-tracker-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx",
+            CreateExportOptions("Bug Tracker"));
+    }
+
+    private static GridXlExportOptions CreateExportOptions(string sheetName) =>
+        new()
+        {
+            SheetName = sheetName,
+            ExportDisplayText = true
+        };
 
     private static string DisplayOrDash(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "-" : value;

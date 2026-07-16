@@ -4,6 +4,13 @@ namespace SmartReviewSystem.Services.DevOps;
 
 internal static class DevOpsDashboardStoryFilter
 {
+    private static readonly string[] InFlightStates =
+    [
+        "Coding In Progress",
+        "Testing Requested",
+        "Resolved"
+    ];
+
     public static IEnumerable<DevOpsStoryItem> Apply(IEnumerable<DevOpsStoryItem> stories, string? searchText, string? stateFilter)
     {
         var query = stories;
@@ -12,7 +19,14 @@ internal static class DevOpsDashboardStoryFilter
 
         if (!string.IsNullOrWhiteSpace(state) && !string.Equals(state, "Any", StringComparison.OrdinalIgnoreCase))
         {
-            query = query.Where(story => string.Equals(story.State, state, StringComparison.OrdinalIgnoreCase));
+            if (string.Equals(state, "In Flight", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(story => InFlightStates.Contains(story.State, StringComparer.OrdinalIgnoreCase));
+            }
+            else
+            {
+                query = query.Where(story => string.Equals(story.State, state, StringComparison.OrdinalIgnoreCase));
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -21,6 +35,7 @@ internal static class DevOpsDashboardStoryFilter
                 story.Id.ToString().Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 story.Title.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 story.AssignedTo.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                story.TeamMember.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 story.Mfe.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 story.ExecutionMode.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 story.OrchestratorPhase.Contains(search, StringComparison.OrdinalIgnoreCase));

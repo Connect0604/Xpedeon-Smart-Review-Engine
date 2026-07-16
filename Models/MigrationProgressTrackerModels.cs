@@ -7,7 +7,8 @@ internal sealed record LegacyInventoryRow(
     string StepName,
     string? PageName,
     string? MicroFrontendName,
-    string? FormName);
+    string? FormName,
+    string ProcessName);
 
 internal sealed record MigrationProgressStoryMatch(
     int StoryId,
@@ -17,6 +18,7 @@ internal sealed record MigrationProgressStoryMatch(
 internal sealed record MigrationProgressItem(
     string StepType,
     string ProcessCode,
+    string ProcessName,
     string StepCode,
     string StepName,
     string? PageName,
@@ -43,6 +45,7 @@ internal sealed record MigrationProgressStepTypeSummary(
 
 internal sealed record MigrationProgressProcessSummary(
     string ProcessCode,
+    string ProcessName,
     int Total,
     int Completed,
     int Pending,

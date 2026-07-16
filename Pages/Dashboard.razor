@@ -77,6 +77,12 @@
                                 <option value="All" selected="@(OrchestratorFilter == "All")">All</option>
                             </select>
                         </label>
+                        <button type="button"
+                                class="dashboard-export-btn"
+                                @onclick="ExportRunningStoriesAsync"
+                                disabled="@(RunningStories.Count == 0)">
+                            Export
+                        </button>
                     </div>
 
                     <div class="dashboard-section-toggle-row">
@@ -102,6 +108,7 @@
                         {
                             <div class="dashboard-table-wrap dashboard-table-wrap--running">
                                 <DxGrid Data="RunningStories"
+                                        @ref="_runningStoriesGrid"
                                         ShowAllRows="true"
                                         KeyFieldName="Id"
                                         CssClass="dashboard-dxgrid dashboard-dxgrid--running"
@@ -382,11 +389,12 @@
                     <div class="dashboard-toolbar">
                         <label class="dashboard-toolbar__search dashboard-filter-group">
                             <span class="dashboard-filter-label">Search</span>
-                            <input class="dashboard-filter-input" @bind="SearchText" @bind:event="oninput" placeholder="Story ID, title, assignee, MFE, execution mode, phase" />
+                            <input class="dashboard-filter-input" @bind="SearchText" @bind:event="oninput" placeholder="Story ID, title, assignee, team member, MFE, execution mode, phase" />
                         </label>
                         <label class="dashboard-filter-group">
                             <span class="dashboard-filter-label">State</span>
                             <select class="dashboard-filter-select" @bind="StateFilter">
+                                <option value="@InFlightStateFilter">@InFlightStateFilter</option>
                                 <option value="Any">Any</option>
                                 <option value="New">New</option>
                                 <option value="Active">Active</option>
@@ -409,6 +417,12 @@
                                 @(IsLoadingAllImplementationDetails ? "Loading Implementation Details..." : "Load Implementation Details")
                             </button>
                         }
+                        <button type="button"
+                                class="dashboard-export-btn dashboard-export-btn--compact"
+                                @onclick="ExportStoryTrackerAsync"
+                                disabled="@(FilteredStories.Count == 0)">
+                            Export
+                        </button>
                     </div>
 
                     @if (FilteredStories.Count == 0)
@@ -432,6 +446,7 @@
                     {
                         <div class="dashboard-table-wrap dashboard-table-wrap--tracker">
                             <DxGrid Data="FilteredStories"
+                                    @ref="_storyTrackerGrid"
                                     ShowAllRows="true"
                                     KeyFieldName="Id"
                                     CssClass="dashboard-dxgrid"
@@ -451,11 +466,19 @@
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
                                     <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.Title)" Caption="Title" MinWidth="200" />
-                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.AssignedTo)" Caption="Assigned To" MinWidth="120">
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.AssignedTo)" Caption="Assigned To" MinWidth="130">
                                         <CellDisplayTemplate Context="cellContext">
                                             @{
                                                 var story = (DevOpsStoryItem)cellContext.DataItem;
                                                 @DisplayOrDash(story.AssignedTo)
+                                            }
+                                        </CellDisplayTemplate>
+                                    </DxGridDataColumn>
+                                    <DxGridDataColumn FieldName="@nameof(DevOpsStoryItem.TeamMember)" Caption="Team Member" MinWidth="120">
+                                        <CellDisplayTemplate Context="cellContext">
+                                            @{
+                                                var story = (DevOpsStoryItem)cellContext.DataItem;
+                                                @DisplayOrDash(story.TeamMember)
                                             }
                                         </CellDisplayTemplate>
                                     </DxGridDataColumn>
@@ -552,19 +575,25 @@
                         </label>
                         <button type="button"
                                 class="dashboard-group-toggle-btn"
-                                @onclick="CollapseAllBugGroups">
-                            Collapse All
+                                @onclick="ExpandAllBugGroups">
+                            Expand All
                         </button>
                         <button type="button"
                                 class="dashboard-group-toggle-btn"
-                                @onclick="ExpandAllBugGroups">
-                            Expand All
+                                @onclick="CollapseAllBugGroups">
+                            Collapse All
                         </button>
                         
                         <div class="dashboard-toolbar__meta">
                             <span>Stories With Bugs: <strong>@BugGroups.Count</strong></span>
                             <span>Total Bugs: <strong>@TotalBugCount</strong></span>
                         </div>
+                        <button type="button"
+                                class="dashboard-export-btn"
+                                @onclick="ExportBugTrackerAsync"
+                                disabled="@(FilteredBugTrackerRows.Count == 0)">
+                            Export
+                        </button>
                     </div>
 
                     @if (IsLoadingStories)
@@ -595,6 +624,7 @@
                     {
                         <div class="dashboard-table-wrap dashboard-table-wrap--bugs" @key="_bugGridRenderVersion">
                             <DxGrid Data="FilteredBugTrackerRows"
+                                    @ref="_bugTrackerGrid"
                                     ShowAllRows="true"
                                     KeyFieldName="@nameof(BugTrackerRow.BugId)"
                                     CssClass="dashboard-dxgrid dashboard-dxgrid--bugs"

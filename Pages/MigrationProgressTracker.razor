@@ -391,7 +391,7 @@
                                             aria-expanded="@expanded"
                                             @onclick="() => ToggleStepTypeProcess(summary.StepType, process.Key)">
                                         <div class="migration-tracker-accordion__title">
-                                            <h3>@process.Label</h3>
+                                            <h3>@FormatProcessDisplayLabel(process.Key, process.Items.Select(item => item.ProcessName).FirstOrDefault())</h3>
                                             <span>@process.Total total</span>
                                         </div>
                                         <div class="migration-tracker-accordion__meta">
@@ -468,7 +468,7 @@
                                 <button type="button" class="migration-tracker-process-card__toggle" @onclick="() => ToggleProcess(process.ProcessCode)">
                                     <div>
                                         <p class="migration-tracker-section-label">Process code</p>
-                                        <h2>@process.ProcessCode</h2>
+                                        <h2>@FormatProcessDisplayLabel(process.ProcessCode, process.ProcessName)</h2>
                                     </div>
                                     <div class="migration-tracker-process-card__metric">
                                         <strong>@process.CompletionPercentage.ToString("0.0")%</strong>
@@ -993,12 +993,17 @@
 
         var term = SearchText.Trim();
         return Contains(item.ProcessCode, term)
+            || Contains(item.ProcessName, term)
             || Contains(item.StepCode, term)
             || Contains(item.StepName, term)
             || Contains(item.PageName, term)
             || Contains(item.MatchedStoryTitle, term)
             || Contains(item.MatchedStoryUrl, term);
     }
+
+    private static string FormatProcessDisplayLabel(string processCode, string? processName) =>
+        string.IsNullOrWhiteSpace(processName) ? processCode : $"{processCode} : {processName}";
+
 
     private static bool Contains(string? value, string term) =>
         !string.IsNullOrWhiteSpace(value) && value.Contains(term, StringComparison.OrdinalIgnoreCase);
